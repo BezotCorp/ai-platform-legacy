@@ -4,12 +4,13 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use crate::tools::authorize_path;
 use anyhow::{Result, bail};
 use cap_std::{
     ambient_authority,
     fs::{Dir, MetadataExt},
 };
+
+use crate::tools::authorize_path;
 
 pub(crate) const FILE_TOO_LARGE: &str = "Fichier trop volumineux";
 
@@ -40,7 +41,6 @@ impl FileManager {
         } else {
             parent_path
         };
-
         Ok(Self {
             filename: filename.to_os_string(),
             root: root.to_path_buf(),

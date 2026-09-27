@@ -39,7 +39,10 @@ impl ToolApprovalGate {
     pub(crate) async fn cancel_all(&self) {
         let pending = {
             let mut pending = self.pending.lock().await;
-            pending.drain().map(|(_, (_, sender))| sender).collect::<Vec<_>>()
+            pending
+                .drain()
+                .map(|(_, (_, sender))| sender)
+                .collect::<Vec<_>>()
         };
         for sender in pending {
             let _ = sender.send(false);

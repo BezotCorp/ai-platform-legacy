@@ -1,8 +1,8 @@
 pub(crate) struct FileSnapshot {
-    pub bytes: Vec<u8>,
-    pub device: u64,
-    pub inode: u64,
-    pub mode: u32,
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) device: u64,
+    pub(crate) inode: u64,
+    pub(crate) mode: u32,
 }
 
 impl FileSnapshot {

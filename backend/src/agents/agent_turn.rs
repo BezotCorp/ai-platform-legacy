@@ -270,6 +270,21 @@ impl AgentTurn {
         if !finished {
             bail!("Limite des tours avec outils atteinte");
         }
+        if complete_answer.trim().is_empty() {
+            bail!("L'agent n'a produit aucune réponse finale");
+        }
+        outbound
+            .send(Event::new(
+                "agent.turn.recorded",
+                request_id,
+                json!({
+                    "agent_id": agent.identity.id,
+                    "layer": layer_index,
+                    "answer": complete_answer.clone(),
+                }),
+            ))
+            .await?;
+
         outbound
             .send(Event::new(
                 "agent.completed",

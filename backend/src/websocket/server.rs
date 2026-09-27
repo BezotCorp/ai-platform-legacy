@@ -22,7 +22,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    agents::MemoryStore,
+    agents::{MemoryStore, validate_context_limits},
     configurations::ConfigurationStore,
     providers::Client,
     sessions::SessionStore,
@@ -82,6 +82,7 @@ pub(crate) async fn run() -> Result<()> {
     }
     let ollama_host = env::var("OLLAMA_HOST").unwrap_or_else(|_| DEFAULT_OLLAMA_HOST.into());
     let client = Client::new(&ollama_host)?;
+    let _ = validate_context_limits()?;
     let project_root = env::var("AI_PLATFORM_PROJECT_ROOT")
         .context("AI_PLATFORM_PROJECT_ROOT doit être fourni par le frontend")?;
     let project_root = fs::canonicalize(&project_root).await?;
@@ -115,15 +116,14 @@ pub(crate) async fn run() -> Result<()> {
         Some(memory) => {
             Some(ConfigurationStore::open(memory.database(), memory.project().to_owned()).await?)
         }
-
         None => None,
     };
-
     let shutdown = CancellationToken::new();
     let connections = Arc::new(RwLock::new(()));
     let connections_for_shutdown = connections.clone();
     let memory_for_shutdown = memory.clone();
     let sessions_for_shutdown = sessions.clone();
+    let writes = Arc::new(Mutex::new(()));
     let writes_for_shutdown = Arc::clone(&writes);
     let state = ServerState {
         shutdown: shutdown.clone(),
@@ -133,7 +133,7 @@ pub(crate) async fn run() -> Result<()> {
         origin: Arc::from(origin),
         gpu: Arc::new(Semaphore::new(1)),
         project_root: Arc::new(project_root),
-        writes: Arc::new(Mutex::new(())),
+        writes,
         approve_reads,
         memory,
         sessions,
@@ -167,7 +167,6 @@ pub(crate) async fn run() -> Result<()> {
         .await
         .context("Fermeture WebSocket incomplète : SQLite n'est pas arrêté prématurément")?;
     drop(drain);
-
     // Une publication autorisée peut continuer sur spawn_blocking après
     // l'annulation de son task. Attendre le verrou partagé avant la fermeture.
     let pending_writes = time::timeout(Duration::from_secs(20), writes_for_shutdown.lock())
@@ -175,14 +174,14 @@ pub(crate) async fn run() -> Result<()> {
         .context("Une publication de fichier reste active pendant l'arrêt")?;
     drop(pending_writes);
     drop(writes_for_shutdown);
-
     // Terminer les éventuelles réservations laissées par un task interrompu.
     // La transaction SQLite se place après toutes les écritures déjà soumises.
     if let Some(store) = sessions_for_shutdown {
-        store.interrupt_active("Backend arrêté pendant une exécution").await?;
+        store
+            .interrupt_active("Backend arrêté pendant une exécution")
+            .await?;
         drop(store);
     }
-
     let shutdown_result = match memory_for_shutdown {
         Some(memory) => memory.shutdown().await,
         None => Ok(()),

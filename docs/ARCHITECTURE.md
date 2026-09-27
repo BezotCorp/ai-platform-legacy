@@ -294,7 +294,7 @@ Le protocole JSON comprend :
 - `configuration.save`, `configuration.load`, `configuration.list`, `configuration.delete` ;
 - `session.save`, `session.load`, `session.list`, `session.delete` ;
 - `session.bind`, `session.resume`, `session.archive` ;
-- `session.runs`, `session.run.load`.
+- `session.runs`, `session.run.load`, `session.run.events`, `session.run.agents`.
 
 ### 11.3. Événements
 
@@ -335,7 +335,13 @@ Les principaux événements sont :
 
 Les identifiants de corrélation permettent de rattacher les événements aux demandes concernées. Les autorisations des outils sont isolées par connexion WebSocket.
 À la reconnexion, après une nouvelle authentification, `session.resume` restitue la configuration liée, la fenêtre active et la révision actuelle. `session.run.load` retrouve un run précis grâce au `run_id` original ; `session.runs` restitue jusqu'à 50 entrées par page, avec les curseurs facultatifs `before_created_at` et `before_request_id` à fournir ensemble pour consulter les pages suivantes. Chaque entrée contient son état, son prompt, son erreur éventuelle, sa réponse finale lorsqu'elle a été persistée et sa révision. Le client peut ensuite consulter `session.archive` pour reconstituer les messages anciens.
-Cette récupération fournit un **état durable** et non la répétition des deltas, décisions ou aperçus d'outils déjà envoyés : le rejeu exact des événements WebSocket n'est pas encore implémenté. Toute approbation en attente d'une connexion interrompue est révoquée. Une publication déjà autorisée et commencée n'est pas interrompue à mi-écriture : le backend attend son issue avant de fermer le stockage. Une nouvelle approbation est nécessaire pour toute nouvelle proposition d'écriture après reconnexion.
+`session.run.events` expose les événements structurés d'une exécution persistante, par pages de 100. `session.run.agents` restitue les réponses individuelles des agents, par pages de 50, avec leur identifiant, leur couche, leur ordre et leur horodatage. Les deux commandes utilisent le curseur exclusif `after_sequence` et sont isolées par projet.
+
+Les traces sont enregistrées avant leur projection WebSocket. Les deltas token par token restent éphémères. Les événements volumineux sont représentés dans le journal par leurs identifiants, leur longueur et leur empreinte SHA-256. La réponse finale reste enregistrée dans `session_runs`.
+
+Le journal est limité à 4 000 événements et 512 contributions d'agents par exécution. Une erreur de persistance de ces traces empêche de publier une réussite durable.
+
+Cette récupération fournit un **état durable** et non la répétition de tous les deltas déjà envoyés : le rejeu exact des flux WebSocket éphémères n'est pas implémenté. Toute approbation en attente d'une connexion interrompue est révoquée. Une publication déjà autorisée et commencée n'est pas interrompue à mi-écriture : le backend attend son issue avant de fermer le stockage. Une nouvelle approbation est nécessaire pour toute nouvelle proposition d'écriture après reconnexion.
 
 ## 12. Frontend
 

@@ -27,7 +27,8 @@ impl ToolInvocation {
         outbound: &mpsc::Sender<Event>,
         cancel: &CancellationToken,
     ) -> Result<Value> {
-        let result = if WriteProposal::is_write(name) {
+        let result: Result<Value> = async {
+            if WriteProposal::is_write(name) {
             let proposal = tokio::select! {
                 () = cancel.cancelled() => {
                     bail!("Exécution annulée");
@@ -95,7 +96,9 @@ impl ToolInvocation {
                     arguments,
                 ) => result,
             }
-        };
+            }
+        }.await;
+
         let payload = match result {
             Ok(value) => {
                 outbound

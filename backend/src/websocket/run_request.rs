@@ -10,22 +10,15 @@ use crate::{
 #[serde(deny_unknown_fields)]
 pub(crate) struct RunRequest {
     #[serde(rename = "type")]
-    pub command: String,
-
-    pub request_id: String,
-
+    pub(crate) command: String,
+    pub(crate) request_id: String,
     #[serde(default)]
-    pub messages: Vec<Message>,
-
-    pub mode: Option<ExecutionMode>,
-
-    pub configuration_id: Option<String>,
-
-    pub configuration_revision: Option<i64>,
-
-    pub session_id: Option<String>,
-
-    pub expected_revision: Option<i64>,
+    pub(crate) messages: Vec<Message>,
+    pub(crate) mode: Option<ExecutionMode>,
+    pub(crate) configuration_id: Option<String>,
+    pub(crate) configuration_revision: Option<i64>,
+    pub(crate) session_id: Option<String>,
+    pub(crate) expected_revision: Option<i64>,
 }
 
 impl RunRequest {

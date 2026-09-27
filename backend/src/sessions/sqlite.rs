@@ -46,6 +46,35 @@ pub(crate) fn apply(connection: &Connection) -> Result<()> {
             ON session_runs(project, session_id)
             WHERE status IN ('queued', 'running');
 
+        CREATE TABLE IF NOT EXISTS session_run_events (
+            project TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            request_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            data TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            PRIMARY KEY(project, session_id, request_id, sequence),
+            FOREIGN KEY(project, session_id, request_id)
+                REFERENCES session_runs(project, session_id, request_id)
+                ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS session_agent_turns (
+            project TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            request_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            agent_id TEXT NOT NULL,
+            layer INTEGER NOT NULL,
+            answer TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            PRIMARY KEY(project, session_id, request_id, sequence),
+            FOREIGN KEY(project, session_id, request_id)
+                REFERENCES session_runs(project, session_id, request_id)
+                ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS session_message_archive (
             project TEXT NOT NULL,
             session_id TEXT NOT NULL,

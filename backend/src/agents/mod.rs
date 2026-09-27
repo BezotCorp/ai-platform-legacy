@@ -12,8 +12,9 @@ pub(crate) use agent_config::AgentConfig;
 pub(crate) use agent_execution::AgentExecution;
 pub(crate) use agent_identity::AgentIdentity;
 pub(crate) use agent_role::AgentRole;
+pub(crate) use context::limits as validate_context_limits;
 pub(crate) use context::{
-    AssembledContext, PreparedToolContext, Provenance, ToolContext, ToolExchange, assemble,
+    PreparedToolContext, Provenance, ToolContext, ToolExchange,
     relevance,
 };
 pub(crate) use memory::{MemoryEntry, MemoryStore, apply, checksum, find, project_scope, save};

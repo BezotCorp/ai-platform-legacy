@@ -54,6 +54,20 @@ pub(crate) enum Command {
         session_id: String,
         run_id: String,
     },
+    #[serde(rename = "session.run.events")]
+    SessionRunEvents {
+        request_id: String,
+        session_id: String,
+        run_id: String,
+        after_sequence: Option<i64>,
+    },
+    #[serde(rename = "session.run.agents")]
+    SessionRunAgents {
+        request_id: String,
+        session_id: String,
+        run_id: String,
+        after_sequence: Option<i64>,
+    },
     #[serde(rename = "session.runs")]
     SessionRuns {
         request_id: String,
