@@ -211,6 +211,9 @@ pub(crate) async fn serve(
             });
             active = Some((request_id, cancel, handle, session_id, stop_reason));
         } else {
+            // Les lectures, écritures et appels Ollama peuvent attendre :
+            // l'arrêt du backend doit pouvoir annuler la commande en cours.
+            let dispatch = async {
             match serde_json::from_value::<Command>(value) {
                 Ok(Command::ModelsList { request_id }) => {
                     let event = list(&client, &request_id).await.unwrap_or_else(|error| {
@@ -224,7 +227,7 @@ pub(crate) async fn serve(
                         )
                     });
                     if tx.send(event).await.is_err() {
-                        break;
+                        return false;
                     }
                 }
                 Ok(Command::ConfigurationSave {
@@ -255,7 +258,7 @@ pub(crate) async fn serve(
                         ),
                     };
                     if tx.send(event).await.is_err() {
-                        break;
+                        return false;
                     }
                 }
                 Ok(Command::ConfigurationLoad {
@@ -291,7 +294,7 @@ pub(crate) async fn serve(
                         ),
                     };
                     if tx.send(event).await.is_err() {
-                        break;
+                        return false;
                     }
                 }
                 Ok(Command::ConfigurationList { request_id }) => {
@@ -316,7 +319,7 @@ pub(crate) async fn serve(
                         ),
                     };
                     if tx.send(event).await.is_err() {
-                        break;
+                        return false;
                     }
                 }
                 Ok(Command::ConfigurationDelete {
@@ -347,7 +350,7 @@ pub(crate) async fn serve(
                         ),
                     };
                     if tx.send(event).await.is_err() {
-                        break;
+                        return false;
                     }
                 }
                 Ok(Command::SessionBind {
@@ -391,7 +394,7 @@ pub(crate) async fn serve(
                         ),
                     };
                     if tx.send(event).await.is_err() {
-                        break;
+                        return false;
                     }
                 }
                 Ok(Command::SessionResume {
@@ -422,7 +425,7 @@ pub(crate) async fn serve(
                         ),
                     };
                     if tx.send(event).await.is_err() {
-                        break;
+                        return false;
                     }
                 }
                 Ok(Command::SessionArchive {
@@ -447,7 +450,7 @@ pub(crate) async fn serve(
                         ),
                     };
                     if tx.send(event).await.is_err() {
-                        break;
+                        return false;
                     }
                 }
                 Ok(Command::SessionRunLoad {
@@ -477,7 +480,7 @@ pub(crate) async fn serve(
                         ),
                     };
                     if tx.send(event).await.is_err() {
-                        break;
+                        return false;
                     }
                 }
                 Ok(Command::SessionRuns {
@@ -507,7 +510,7 @@ pub(crate) async fn serve(
                         ),
                     };
                     if tx.send(event).await.is_err() {
-                        break;
+                        return false;
                     }
                 }
                 Ok(Command::SessionSave {
@@ -534,7 +537,7 @@ pub(crate) async fn serve(
                         ),
                     };
                     if tx.send(event).await.is_err() {
-                        break;
+                        return false;
                     }
                 }
                 Ok(Command::SessionLoad {
@@ -565,7 +568,7 @@ pub(crate) async fn serve(
                         ),
                     };
                     if tx.send(event).await.is_err() {
-                        break;
+                        return false;
                     }
                 }
                 Ok(Command::SessionList { request_id }) => {
@@ -587,7 +590,7 @@ pub(crate) async fn serve(
                         ),
                     };
                     if tx.send(event).await.is_err() {
-                        break;
+                        return false;
                     }
                 }
                 Ok(Command::SessionDelete {
@@ -618,7 +621,7 @@ pub(crate) async fn serve(
                         ),
                     };
                     if tx.send(event).await.is_err() {
-                        break;
+                        return false;
                     }
                 }
                 Ok(Command::RunCancel { request_id }) => match &active {
@@ -684,9 +687,22 @@ pub(crate) async fn serve(
                         ))
                         .await;
                 }
+            };
+                true
+            };
+            let keep_open = tokio::select! {
+                () = shutdown.cancelled() => false,
+                () = writer_closed.cancelled() => false,
+                keep_open = dispatch => keep_open,
+            };
+            if !keep_open {
+                break;
             }
         }
     }
+    // Révoquer immédiatement toutes les approbations encore en attente.
+    // Une décision reçue après la déconnexion ne peut plus autoriser une écriture.
+    approvals.cancel_all().await;
     if let Some((request_id, token, mut handle, session_id, stop_reason)) = active {
         let _ = stop_reason.compare_exchange(
             0,

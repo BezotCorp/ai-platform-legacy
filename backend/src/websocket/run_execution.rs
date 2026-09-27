@@ -219,6 +219,7 @@ impl RunExecution {
         // Différer run.completed jusqu'à la validation de la transaction SQLite.
         let (run_tx, mut run_rx) = mpsc::channel::<Event>(128);
         let forward_tx = outbound.clone();
+        let forward_cancel = cancel.clone();
         let forward = tokio::spawn(async move {
             let mut final_answer = None;
             while let Some(event) = run_rx.recv().await {
@@ -227,10 +228,11 @@ impl RunExecution {
                         .and_then(Value::as_str).map(str::to_owned);
                     continue;
                 }
-                if forward_tx.send(event).await.is_err() {
-                    // Continuer à consommer les événements pour ne pas bloquer
-                    // l'agent sur une connexion déjà perdue.
-                    continue;
+                // Une connexion saturée ne doit pas empêcher la tâche
+                // d'observer une annulation ni bloquer son état terminal.
+                tokio::select! {
+                    () = forward_cancel.cancelled() => {}
+                    _ = forward_tx.send(event) => {}
                 }
             }
             final_answer

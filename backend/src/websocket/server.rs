@@ -123,6 +123,8 @@ pub(crate) async fn run() -> Result<()> {
     let connections = Arc::new(RwLock::new(()));
     let connections_for_shutdown = connections.clone();
     let memory_for_shutdown = memory.clone();
+    let sessions_for_shutdown = sessions.clone();
+    let writes_for_shutdown = Arc::clone(&writes);
     let state = ServerState {
         shutdown: shutdown.clone(),
         connections,
@@ -165,6 +167,22 @@ pub(crate) async fn run() -> Result<()> {
         .await
         .context("Fermeture WebSocket incomplète : SQLite n'est pas arrêté prématurément")?;
     drop(drain);
+
+    // Une publication autorisée peut continuer sur spawn_blocking après
+    // l'annulation de son task. Attendre le verrou partagé avant la fermeture.
+    let pending_writes = time::timeout(Duration::from_secs(20), writes_for_shutdown.lock())
+        .await
+        .context("Une publication de fichier reste active pendant l'arrêt")?;
+    drop(pending_writes);
+    drop(writes_for_shutdown);
+
+    // Terminer les éventuelles réservations laissées par un task interrompu.
+    // La transaction SQLite se place après toutes les écritures déjà soumises.
+    if let Some(store) = sessions_for_shutdown {
+        store.interrupt_active("Backend arrêté pendant une exécution").await?;
+        drop(store);
+    }
+
     let shutdown_result = match memory_for_shutdown {
         Some(memory) => memory.shutdown().await,
         None => Ok(()),

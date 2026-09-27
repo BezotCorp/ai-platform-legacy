@@ -28,7 +28,12 @@ impl ToolInvocation {
         cancel: &CancellationToken,
     ) -> Result<Value> {
         let result = if WriteProposal::is_write(name) {
-            let proposal = WriteProposal::prepare(project_root, name, arguments).await?;
+            let proposal = tokio::select! {
+                () = cancel.cancelled() => {
+                    bail!("Exécution annulée");
+                }
+                prepared = WriteProposal::prepare(project_root, name, arguments) => prepared?,
+            };
             let preview = proposal.preview();
             let preview_sha256 = ToolApprovalGate::preview_sha256(&preview)?;
             outbound
@@ -59,7 +64,12 @@ impl ToolInvocation {
                     cancel,
                 )
                 .await?;
-            let guard = writes.clone().lock_owned().await;
+            let guard = tokio::select! {
+                () = cancel.cancelled() => {
+                    bail!("Exécution annulée");
+                }
+                guard = writes.clone().lock_owned() => guard,
+            };
             if cancel.is_cancelled() {
                 bail!("Exécution annulée");
             }

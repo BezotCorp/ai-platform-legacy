@@ -14,22 +14,28 @@ pub(crate) struct SessionStore {
 
 impl SessionStore {
     pub(crate) async fn open(database: Database, project: String) -> Result<Self> {
-        let scope = project.clone();
-        database
+        let store = Self { database, project };
+        store
+            .interrupt_active("Backend redémarré après une exécution interrompue")
+            .await?;
+        Ok(store)
+    }
+
+    pub(crate) async fn interrupt_active(&self, reason: &'static str) -> Result<usize> {
+        let project = self.project.clone();
+        self.database
             .write(move |connection| {
-                connection.execute(
+                Ok(connection.execute(
                     "UPDATE session_runs
                      SET status = 'interrupted',
-                         error = 'Backend arrêté pendant une exécution',
+                         error = ?2,
                          updated_at = unixepoch()
                      WHERE project = ?1
                        AND status IN ('queued', 'running')",
-                    params![scope],
-                )?;
-                Ok(())
+                    params![project, reason],
+                )?)
             })
-            .await?;
-        Ok(Self { database, project })
+            .await
     }
 
     pub(super) fn validate_id(id: &str) -> Result<()> {

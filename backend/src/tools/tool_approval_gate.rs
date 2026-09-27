@@ -36,6 +36,16 @@ impl ToolApprovalGate {
             .collect())
     }
 
+    pub(crate) async fn cancel_all(&self) {
+        let pending = {
+            let mut pending = self.pending.lock().await;
+            pending.drain().map(|(_, (_, sender))| sender).collect::<Vec<_>>()
+        };
+        for sender in pending {
+            let _ = sender.send(false);
+        }
+    }
+
     pub(crate) async fn resolve(
         &self,
         request_id: &str,
@@ -91,7 +101,14 @@ impl ToolApprovalGate {
             }),
         );
         let result = async {
-            outbound.send(notification).await?;
+            select! {
+                () = cancel.cancelled() => {
+                    bail!("Exécution annulée");
+                }
+                delivered = outbound.send(notification) => {
+                    delivered?;
+                }
+            }
             let decision = select! {
                 () = cancel.cancelled() => {
                     bail!("Exécution annulée");
