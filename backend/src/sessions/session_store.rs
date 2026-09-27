@@ -8,18 +8,32 @@ use crate::{
 
 #[derive(Clone)]
 pub(crate) struct SessionStore {
-    database: Database,
-    project: String,
+    pub(super) database: Database,
+    pub(super) project: String,
 }
 
 impl SessionStore {
     pub(crate) async fn open(database: Database, project: String) -> Result<Self> {
         database.write(apply).await?;
-
+        let scope = project.clone();
+        database
+            .write(move |connection| {
+                connection.execute(
+                    "UPDATE session_runs
+                     SET status = 'interrupted',
+                         error = 'Backend arrêté pendant une exécution',
+                         updated_at = unixepoch()
+                     WHERE project = ?1
+                       AND status = 'running'",
+                    params![scope],
+                )?;
+                Ok(())
+            })
+            .await?;
         Ok(Self { database, project })
     }
 
-    fn validate_id(id: &str) -> Result<()> {
+    pub(super) fn validate_id(id: &str) -> Result<()> {
         if id.is_empty()
             || id.len() > 128
             || !id
@@ -66,7 +80,15 @@ impl SessionStore {
                              updated_at = unixepoch()
                          WHERE project = ?1
                            AND id = ?2
-                           AND revision = ?4",
+                           AND revision = ?4
+                           AND configuration_id IS NULL
+                           AND NOT EXISTS (
+                               SELECT 1
+                               FROM session_runs
+                               WHERE project = ?1
+                                 AND session_id = ?2
+                                 AND status = 'running'
+                           )",
                         params![project, id, encoded, expected_revision,],
                     )?
                 };
@@ -177,9 +199,24 @@ impl SessionStore {
                     "DELETE FROM sessions
                      WHERE project = ?1
                        AND id = ?2
-                       AND revision = ?3",
+                       AND revision = ?3
+                           AND NOT EXISTS (
+                               SELECT 1
+                               FROM session_runs
+                               WHERE project = ?1
+                                 AND session_id = ?2
+                                 AND status = 'running'
+                           )",
                     params![project, id, expected_revision,],
                 )?;
+                if changed == 1 {
+                    connection.execute(
+                        "DELETE FROM session_runs
+                         WHERE project = ?1
+                           AND session_id = ?2",
+                        params![project, id],
+                    )?;
+                }
                 Ok(changed == 1)
             })
             .await

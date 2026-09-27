@@ -404,7 +404,6 @@ Les fonctionnalités suivantes restent à développer :
 - la découverte des capacités réelles des modèles ;
 - la reprise des événements après reconnexion ;
 - la reprise d'une exécution après redémarrage ;
-- la sauvegarde automatique des sessions ;
 - les historiques d'agents persistants entre exécutions ;
 - les populations évolutionnaires ;
 - la composition hiérarchique des architectures ;
@@ -503,3 +502,49 @@ rapports, contributions et décisions.
 Un éventuel mécanisme de reprise devra
 préciser quelles données temporaires conserver,
 comment les versionner et quand les supprimer.
+
+## Sessions liées et reprise des conversations
+
+Une session peut être associée à une configuration
+persistante avec `session.bind`.
+
+L'association conserve une copie de la configuration
+et de sa révision. Une modification ultérieure de
+la configuration d'origine ne modifie pas
+silencieusement une conversation existante.
+
+`session.resume` restitue l'historique,
+la configuration associée et la révision de session.
+
+`run.start` accepte exactement une source :
+
+- une configuration complète ;
+- une configuration enregistrée identifiée par son ID ;
+- une session liée à une configuration.
+
+Dans le cas d'une session liée, le frontend transmet
+un seul nouveau message utilisateur et la révision
+attendue de la session.
+
+Le backend recharge l'historique, ajoute la demande,
+exécute les agents et enregistre automatiquement
+la réponse finale après une génération réussie.
+
+`session.runs` permet de consulter les exécutions
+terminées, échouées, annulées ou interrompues.
+
+Une génération interrompue n'est pas relancée
+automatiquement après redémarrage.
+
+Les anciennes sessions restent lisibles et peuvent
+être associées à une configuration persistante.
+
+La limite actuelle de 32 messages reste applicable.
+La rotation automatique des conversations
+n'est pas implémentée.
+
+Une exécution sans session demeure temporaire.
+
+Le WebSocket existant reste l'unique interface
+applicative du backend. Aucun CLI supplémentaire
+n'est introduit.

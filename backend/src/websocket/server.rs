@@ -101,13 +101,7 @@ pub(crate) async fn run() -> Result<()> {
     };
     let configurations = match memory.as_ref() {
         Some(memory) => {
-            Some(
-                ConfigurationStore::open(
-                    memory.database(),
-                    memory.project().to_owned(),
-                )
-                .await?,
-            )
+            Some(ConfigurationStore::open(memory.database(), memory.project().to_owned()).await?)
         }
 
         None => None,

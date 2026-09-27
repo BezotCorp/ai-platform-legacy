@@ -40,9 +40,7 @@ pub(crate) fn apply(connection: &Connection) -> Result<()> {
         Some(1) => {}
 
         Some(version) => {
-            bail!(
-                "Version du schéma configurations non prise en charge : {version}"
-            );
+            bail!("Version du schéma configurations non prise en charge : {version}");
         }
     }
 

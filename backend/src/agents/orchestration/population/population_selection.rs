@@ -24,9 +24,7 @@ impl PopulationSelection {
 
         let selection: Self = serde_json::from_str(response)?;
 
-        if selection.agent_ids.len() < minimum
-            || selection.agent_ids.len() > maximum
-        {
+        if selection.agent_ids.len() < minimum || selection.agent_ids.len() > maximum {
             bail!("Adaptive population size outside configured bounds");
         }
 

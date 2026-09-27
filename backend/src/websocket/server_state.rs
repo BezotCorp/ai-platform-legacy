@@ -3,9 +3,7 @@ use tokio::sync::{Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    agents::MemoryStore,
-    configurations::ConfigurationStore,
-    providers::Client,
+    agents::MemoryStore, configurations::ConfigurationStore, providers::Client,
     sessions::SessionStore,
 };
 

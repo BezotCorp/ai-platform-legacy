@@ -3,10 +3,7 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    agents::{
-        Population, PopulationSelection, WorkerReport,
-        context::assemble,
-    },
+    agents::{Population, PopulationSelection, WorkerReport, context::assemble},
     providers::{Chat, Client},
     sessions::Message,
 };
@@ -113,11 +110,6 @@ impl PopulationSelector {
             bail!("Unexpected tool call during population selection");
         }
 
-        PopulationSelection::parse(
-            &result.content,
-            &config.agents,
-            minimum,
-            maximum,
-        )
+        PopulationSelection::parse(&result.content, &config.agents, minimum, maximum)
     }
 }

@@ -2,19 +2,9 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::agents::{
-    AgentConfig,
-    ParticipationPolicy,
-};
+use crate::agents::{AgentConfig, ParticipationPolicy};
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Deserialize,
-    Serialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Population {
     pub agents: Vec<AgentConfig>,
@@ -33,9 +23,7 @@ impl Population {
         participation: ParticipationPolicy,
     ) -> Result<Self, &'static str> {
         if !(2..=4).contains(&agents.len()) {
-            return Err(
-                "A population requires two to four agents"
-            );
+            return Err("A population requires two to four agents");
         }
 
         if !(1..=4).contains(&rounds) {
@@ -47,9 +35,7 @@ impl Population {
 
         for agent in &agents {
             if !identifiers.insert(&agent.identity.id) {
-                return Err(
-                    "Duplicate population agent identifier"
-                );
+                return Err("Duplicate population agent identifier");
             }
         }
 
@@ -58,13 +44,8 @@ impl Population {
             max_agents,
         } = &participation
         {
-            if *min_agents == 0
-                || min_agents > max_agents
-                || *max_agents > agents.len()
-            {
-                return Err(
-                    "Invalid adaptive population bounds"
-                );
+            if *min_agents == 0 || min_agents > max_agents || *max_agents > agents.len() {
+                return Err("Invalid adaptive population bounds");
             }
         }
 

@@ -7,10 +7,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     agents::{
-        Population, MemoryStore, ParticipationPolicy,
-        WorkerReport, agent_turn::AgentTurn,
-        context::limits,
-        orchestration::population::population_selector::PopulationSelector,
+        MemoryStore, ParticipationPolicy, Population, WorkerReport, agent_turn::AgentTurn,
+        context::limits, orchestration::population::population_selector::PopulationSelector,
     },
     event::Event,
     providers::Client,
@@ -38,17 +36,11 @@ impl PopulationExecution {
         let (context_tokens, output_tokens) = limits()?;
         let definitions = tools::definitions();
 
-        let tool_tokens = serde_json::to_vec(&definitions)?
-            .len()
-            .saturating_add(256);
+        let tool_tokens = serde_json::to_vec(&definitions)?.len().saturating_add(256);
 
-        let original_request = &history
-            .last()
-            .context("Conversation vide")?
-            .content;
+        let original_request = &history.last().context("Conversation vide")?.content;
 
-        let mut individual_histories =
-            HashMap::<String, Vec<Message>>::new();
+        let mut individual_histories = HashMap::<String, Vec<Message>>::new();
 
         let mut reports = Vec::<WorkerReport>::new();
         let mut previous_round = Vec::<(String, String)>::new();
@@ -109,9 +101,7 @@ impl PopulationExecution {
 
                 let agent_history = individual_histories
                     .entry(agent.identity.id.clone())
-                    .or_insert_with(|| {
-                        history[..history.len() - 1].to_vec()
-                    });
+                    .or_insert_with(|| history[..history.len() - 1].to_vec());
 
                 agent_history.push(Message {
                     role: "user".to_owned(),
@@ -152,29 +142,17 @@ impl PopulationExecution {
                 // Les échanges collectifs sont bornés séparément.
                 agent_history.push(Message {
                     role: "assistant".to_owned(),
-                    content: answer
-                        .chars()
-                        .take(2000)
-                        .collect(),
+                    content: answer.chars().take(2000).collect(),
                 });
 
-                let shared = answer
-                    .chars()
-                    .take(240)
-                    .collect::<String>();
+                let shared = answer.chars().take(240).collect::<String>();
 
-                current_round.push((
-                    agent.identity.id.clone(),
-                    shared,
-                ));
+                current_round.push((agent.identity.id.clone(), shared));
 
                 reports.push(WorkerReport {
                     agent_id: agent.identity.id.clone(),
                     task: format!("Tour collaboratif {}", round + 1),
-                    answer: answer
-                        .chars()
-                        .take(900)
-                        .collect(),
+                    answer: answer.chars().take(900).collect(),
                 });
             }
 
@@ -223,9 +201,7 @@ impl PopulationExecution {
         .await?;
 
         if let Some(store) = memory
-            && let Err(error) = store
-                .remember(original_request, &answer)
-                .await
+            && let Err(error) = store.remember(original_request, &answer).await
         {
             outbound
                 .send(Event::new(
