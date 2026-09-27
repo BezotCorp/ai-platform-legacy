@@ -4,7 +4,7 @@ use rusqlite::{OptionalExtension, params};
 use crate::{
     agents::ExecutionMode,
     configurations::SavedConfiguration,
-    sessions::{BoundSession, History, Message, Session, SessionRun, SessionStore},
+    sessions::{ArchivedMessage, BoundSession, History, Message, Session, SessionRun, SessionStore},
 };
 
 impl SessionStore {
@@ -211,9 +211,6 @@ impl SessionStore {
                 let mode = mode.validate()?;
                 let mut messages: Vec<Message> = serde_json::from_str(&stored.1)?;
                 History::validate(&messages)?;
-                if messages.len() > 30 {
-                    bail!("Session pleine : créer une nouvelle session");
-                }
                 let running: i64 = connection.query_row(
                     "SELECT COUNT(*)
                      FROM session_runs
@@ -225,6 +222,27 @@ impl SessionStore {
                 )?;
                 if running != 0 {
                     bail!("Session déjà en cours d'exécution");
+                }
+                // Déplacer les messages anciens avant le nouveau tour, sans les perdre.
+                let overflow = messages.len().saturating_sub(30);
+                if overflow > 0 {
+                    let mut next_sequence: i64 = connection.query_row(
+                        "SELECT COALESCE(MAX(sequence), 0)
+                         FROM session_message_archive
+                         WHERE project = ?1 AND session_id = ?2",
+                        params![project, session_id],
+                        |row| row.get(0),
+                    )?;
+                    for old in messages.drain(..overflow) {
+                        next_sequence = next_sequence.checked_add(1)
+                            .context("Archive de session saturée")?;
+                        connection.execute(
+                            "INSERT INTO session_message_archive
+                                (project, session_id, sequence, role, content)
+                             VALUES (?1, ?2, ?3, ?4, ?5)",
+                            params![project, session_id, next_sequence, old.role, old.content],
+                        )?;
+                    }
                 }
                 messages.push(prompt.clone());
                 History::validate(&messages)?;
@@ -377,6 +395,46 @@ impl SessionStore {
                 let rows =
                     statement.query_map(params![project, session_id], SessionRun::from_row)?;
                 Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+            })
+            .await
+    }
+}
+
+impl SessionStore {
+    /// Pages d'archives ordonnées de la plus récente à la plus ancienne.
+    pub(crate) async fn archive(
+        &self,
+        session_id: String,
+        before_sequence: Option<i64>,
+    ) -> Result<Vec<ArchivedMessage>> {
+        Self::validate_id(&session_id)?;
+        if before_sequence.is_some_and(|sequence| sequence < 1) {
+            bail!("Curseur d'archive invalide");
+        }
+        let project = self.project.clone();
+        self.database
+            .read(move |connection| {
+                let mut statement = connection.prepare(
+                    "SELECT sequence, role, content, archived_at
+                     FROM session_message_archive
+                     WHERE project = ?1 AND session_id = ?2
+                       AND (?3 IS NULL OR sequence < ?3)
+                     ORDER BY sequence DESC LIMIT 50",
+                )?;
+                let messages = statement.query_map(
+                    params![project, session_id, before_sequence],
+                    |row| {
+                        Ok(ArchivedMessage {
+                            sequence: row.get(0)?,
+                            message: Message {
+                                role: row.get(1)?,
+                                content: row.get(2)?,
+                            },
+                            archived_at: row.get(3)?,
+                        })
+                    },
+                )?;
+                Ok(messages.collect::<rusqlite::Result<Vec<_>>>()?)
             })
             .await
     }

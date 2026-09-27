@@ -37,9 +37,14 @@ pub(crate) fn apply(connection: &Connection) -> Result<()> {
             )?;
 
             migrate_to_v2(connection)?;
+            migrate_to_v3(connection)?;
         }
-        Some(1) => migrate_to_v2(connection)?,
-        Some(2) => {}
+        Some(1) => {
+            migrate_to_v2(connection)?;
+            migrate_to_v3(connection)?;
+        }
+        Some(2) => migrate_to_v3(connection)?,
+        Some(3) => {}
         Some(version) => {
             bail!("Version du schéma sessions non prise en charge : {version}");
         }
@@ -83,6 +88,24 @@ fn migrate_to_v2(connection: &Connection) -> Result<()> {
          UPDATE session_schema_version
             SET version = 2
             WHERE version = 1;",
+    )?;
+    Ok(())
+}
+
+fn migrate_to_v3(connection: &Connection) -> Result<()> {
+    connection.execute_batch(
+        "CREATE TABLE session_message_archive (
+            project TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+            content TEXT NOT NULL,
+            archived_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            PRIMARY KEY(project, session_id, sequence),
+            FOREIGN KEY(project, session_id)
+                REFERENCES sessions(project, id) ON DELETE CASCADE
+         );
+         UPDATE session_schema_version SET version = 3 WHERE version = 2;",
     )?;
     Ok(())
 }

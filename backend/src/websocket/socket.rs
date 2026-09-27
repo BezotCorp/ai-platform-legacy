@@ -383,6 +383,31 @@ pub(crate) async fn serve(
                         break;
                     }
                 }
+                Ok(Command::SessionArchive {
+                    request_id,
+                    session_id,
+                    before_sequence,
+                }) => {
+                    let result = match sessions.as_ref() {
+                        Some(store) => store.archive(session_id, before_sequence).await,
+                        None => Err(anyhow::anyhow!("Persistance des sessions désactivée")),
+                    };
+                    let event = match result {
+                        Ok(messages) => Event::new(
+                            "session.archive",
+                            &request_id,
+                            json!({ "messages": messages }),
+                        ),
+                        Err(error) => Event::new(
+                            "session.failed",
+                            &request_id,
+                            json!({ "error": error.to_string() }),
+                        ),
+                    };
+                    if tx.send(event).await.is_err() {
+                        break;
+                    }
+                }
                 Ok(Command::SessionRuns {
                     request_id,
                     session_id,

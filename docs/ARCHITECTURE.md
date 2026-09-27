@@ -539,9 +539,21 @@ automatiquement après redémarrage.
 Les anciennes sessions restent lisibles et peuvent
 être associées à une configuration persistante.
 
-La limite actuelle de 32 messages reste applicable.
-La rotation automatique des conversations
-n'est pas implémentée.
+La fenêtre active conserve au maximum 32 messages. Avant chaque
+nouvelle exécution d'une session liée, le backend archive les messages
+les plus anciens pour conserver au maximum 30 messages précédents,
+puis ajoute la demande et la réponse. Cette opération est atomique
+avec l'enregistrement du prompt et du run dans SQLite. La conversation
+complète reste récupérable via `session.archive`, par pages d'au plus
+50 messages, dans l'ordre antéchronologique. Le curseur exclusif
+`before_sequence` permet de charger les pages précédentes.
+
+Le schéma sessions v3 introduit `session_message_archive`. Les bases
+v1 et v2 sont migrées sans suppression des sessions existantes.
+Une exécution échouée ou annulée après `session.run.started` conserve
+le prompt enregistré et le statut du run. Une interruption brutale
+est marquée `interrupted` à la réouverture du backend, sans reprise
+automatique de génération.
 
 Une exécution sans session demeure temporaire.
 
