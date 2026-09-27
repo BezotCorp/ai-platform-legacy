@@ -48,10 +48,18 @@ pub(crate) enum Command {
         session_id: String,
         before_sequence: Option<i64>,
     },
+    #[serde(rename = "session.run.load")]
+    SessionRunLoad {
+        request_id: String,
+        session_id: String,
+        run_id: String,
+    },
     #[serde(rename = "session.runs")]
     SessionRuns {
         request_id: String,
         session_id: String,
+        before_created_at: Option<i64>,
+        before_request_id: Option<String>,
     },
     #[serde(rename = "session.save")]
     SessionSave {

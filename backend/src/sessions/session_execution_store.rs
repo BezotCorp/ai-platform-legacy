@@ -62,7 +62,7 @@ impl SessionStore {
                                FROM session_runs
                                WHERE project = ?1
                                  AND session_id = ?2
-                                 AND status = 'running'
+                                 AND status IN ('queued', 'running')
                            )",
                         params![
                             project,
@@ -165,7 +165,7 @@ impl SessionStore {
             .await
     }
 
-    pub(crate) async fn begin_run(
+    pub(crate) async fn queue_run(
         &self,
         session_id: String,
         expected_revision: i64,
@@ -218,7 +218,7 @@ impl SessionStore {
                      FROM session_runs
                      WHERE project = ?1
                        AND session_id = ?2
-                       AND status = 'running'",
+                       AND status IN ('queued', 'running')",
                     params![project, session_id],
                     |row| row.get(0),
                 )?;
@@ -292,12 +292,35 @@ impl SessionStore {
                         status,
                         prompt
                     )
-                    VALUES (?1, ?2, ?3, 'running', ?4)",
+                    VALUES (?1, ?2, ?3, 'queued', ?4)",
                     params![project, session_id, request_id, prompt.content,],
+                )?;
+                connection.execute(
+                    "UPDATE session_runs
+                     SET session_revision = ?4
+                     WHERE project = ?1 AND session_id = ?2 AND request_id = ?3",
+                    params![project, session_id, request_id, expected_revision + 1],
                 )?;
                 Ok((messages, mode, expected_revision + 1))
             })
             .await
+    }
+
+    pub(crate) async fn start_run(&self, session_id: String, request_id: String) -> Result<()> {
+        Self::validate_id(&session_id)?;
+        let project = self.project.clone();
+        self.database.write(move |connection| {
+            let changed = connection.execute(
+                "UPDATE session_runs SET status = 'running', updated_at = unixepoch()
+                 WHERE project = ?1 AND session_id = ?2 AND request_id = ?3
+                   AND status = 'queued'",
+                params![project, session_id, request_id],
+            )?;
+            if changed != 1 {
+                bail!("Exécution en attente introuvable ou déjà terminée");
+            }
+            Ok(())
+        }).await
     }
 
     pub(crate) async fn complete_run(
@@ -312,6 +335,7 @@ impl SessionStore {
             content: answer,
         };
         History::validate(std::slice::from_ref(&response))?;
+        let response_content = response.content.clone();
         let project = self.project.clone();
         self.database
             .write(move |connection| {
@@ -352,12 +376,14 @@ impl SessionStore {
                 connection.execute(
                     "UPDATE session_runs
                      SET status = 'completed',
+                         result = ?4,
+                         session_revision = ?5,
                          updated_at = unixepoch()
                      WHERE project = ?1
                        AND session_id = ?2
                        AND request_id = ?3
                        AND status = 'running'",
-                    params![project, session_id, request_id,],
+                    params![project, session_id, request_id, response_content, revision + 1],
                 )?;
                 Ok(revision + 1)
             })
@@ -368,12 +394,14 @@ impl SessionStore {
         &self,
         session_id: String,
         request_id: String,
-        cancelled: bool,
+        status: &'static str,
         error: String,
     ) -> Result<()> {
         Self::validate_id(&session_id)?;
         let project = self.project.clone();
-        let status = if cancelled { "cancelled" } else { "failed" };
+        if !matches!(status, "failed" | "cancelled" | "interrupted") {
+            bail!("État terminal d'exécution invalide");
+        }
         let error = error.chars().take(2048).collect::<String>();
         self.database
             .write(move |connection| {
@@ -385,7 +413,7 @@ impl SessionStore {
                      WHERE project = ?1
                        AND session_id = ?2
                        AND request_id = ?3
-                       AND status = 'running'",
+                       AND status IN ('queued', 'running')",
                     params![project, session_id, request_id, status, error,],
                 )?;
                 if changed != 1 {
@@ -396,8 +424,43 @@ impl SessionStore {
             .await
     }
 
-    pub(crate) async fn runs(&self, session_id: String) -> Result<Vec<SessionRun>> {
+    pub(crate) async fn load_run(
+        &self,
+        session_id: String,
+        request_id: String,
+    ) -> Result<Option<SessionRun>> {
         Self::validate_id(&session_id)?;
+        if request_id.is_empty() || request_id.len() > 128 {
+            bail!("Identifiant d'exécution invalide");
+        }
+        let project = self.project.clone();
+        self.database.read(move |connection| {
+            Ok(connection.query_row(
+                "SELECT request_id, status, prompt, error, result,
+                        session_revision, created_at, updated_at
+                 FROM session_runs
+                 WHERE project = ?1 AND session_id = ?2 AND request_id = ?3",
+                params![project, session_id, request_id],
+                SessionRun::from_row,
+            ).optional()?)
+        }).await
+    }
+
+    pub(crate) async fn runs(
+        &self,
+        session_id: String,
+        before: Option<(i64, String)>,
+    ) -> Result<Vec<SessionRun>> {
+        Self::validate_id(&session_id)?;
+        if before.as_ref().is_some_and(|(created_at, request_id)| {
+            *created_at < 0 || request_id.is_empty() || request_id.len() > 128
+        }) {
+            bail!("Curseur d'exécution invalide");
+        }
+        let (before_created_at, before_request_id) = match before {
+            Some((created_at, request_id)) => (Some(created_at), Some(request_id)),
+            None => (None, None),
+        };
         let project = self.project.clone();
         self.database
             .read(move |connection| {
@@ -407,17 +470,25 @@ impl SessionStore {
                         status,
                         prompt,
                         error,
+                        result,
+                        session_revision,
                         created_at,
                         updated_at
                      FROM session_runs
                      WHERE project = ?1
                        AND session_id = ?2
+                       AND (
+                           ?3 IS NULL OR created_at < ?3 OR
+                           (created_at = ?3 AND request_id < ?4)
+                       )
                      ORDER BY created_at DESC,
                               request_id DESC
                      LIMIT 50",
                 )?;
-                let rows =
-                    statement.query_map(params![project, session_id], SessionRun::from_row)?;
+                let rows = statement.query_map(
+                    params![project, session_id, before_created_at, before_request_id],
+                    SessionRun::from_row,
+                )?;
                 Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
             })
             .await

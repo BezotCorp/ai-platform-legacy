@@ -38,13 +38,19 @@ pub(crate) fn apply(connection: &Connection) -> Result<()> {
 
             migrate_to_v2(connection)?;
             migrate_to_v3(connection)?;
+            migrate_to_v4(connection)?;
         }
         Some(1) => {
             migrate_to_v2(connection)?;
             migrate_to_v3(connection)?;
+            migrate_to_v4(connection)?;
         }
-        Some(2) => migrate_to_v3(connection)?,
-        Some(3) => {}
+        Some(2) => {
+            migrate_to_v3(connection)?;
+            migrate_to_v4(connection)?;
+        }
+        Some(3) => migrate_to_v4(connection)?,
+        Some(4) => {}
         Some(version) => {
             bail!("Version du schéma sessions non prise en charge : {version}");
         }
@@ -106,6 +112,17 @@ fn migrate_to_v3(connection: &Connection) -> Result<()> {
                 REFERENCES sessions(project, id) ON DELETE CASCADE
          );
          UPDATE session_schema_version SET version = 3 WHERE version = 2;",
+    )?;
+    Ok(())
+}
+
+fn migrate_to_v4(connection: &Connection) -> Result<()> {
+    connection.execute_batch(
+        "ALTER TABLE session_runs ADD COLUMN result TEXT;
+         ALTER TABLE session_runs ADD COLUMN session_revision INTEGER;
+         CREATE INDEX session_runs_active
+             ON session_runs(project, session_id, status);
+         UPDATE session_schema_version SET version = 4 WHERE version = 3;",
     )?;
     Ok(())
 }

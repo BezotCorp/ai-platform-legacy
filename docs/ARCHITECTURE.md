@@ -259,10 +259,9 @@ Les opérations de liste sont bornées.
 
 Les sessions et la mémoire conversationnelle remplissent des fonctions distinctes.
 Une session conserve un historique explicite. La mémoire conserve des informations réutilisables entre les exécutions.
-La commande run.start reçoit les messages de la conversation. Leur enregistrement reste une opération distincte, effectuée par session.save.
-Le futur frontend devra gérer explicitement cette sauvegarde.
-La sauvegarde automatique des exécutions interrompues et leur reprise après redémarrage ne sont pas implémentées.
-La persistance des sessions dépend actuellement de l'activation de la base SQLite facultative.
+Une exécution temporaire fournit directement ses messages et n'est pas enregistrée dans SQLite. Une exécution liée à une session reçoit uniquement son nouveau message utilisateur et la révision attendue. Dans une transaction SQLite unique, le backend archive les anciens messages si nécessaire, enregistre le prompt, incrémente la révision et réserve une entrée de journal en état `queued` **avant l'attente du GPU**. Les autres connexions ne peuvent ni lancer un second run sur cette session, ni modifier son historique ou sa configuration tant qu'un run est `queued` ou `running`.
+Après acquisition du GPU, l'état devient `running`. Une réussite enregistre la réponse finale, l'état `completed`, le résultat et la nouvelle révision de session dans une transaction unique ; `run.completed` n'est émis qu'après la confirmation de cette transaction. Une erreur, une annulation explicite ou la perte de connexion entraîne respectivement un état `failed`, `cancelled` ou `interrupted`. Le prompt déjà enregistré et la révision obtenue au début du run sont conservés. Une annulation pendant l'attente du GPU est journalisée et ne démarre pas la génération.
+Au redémarrage, les entrées demeurées `queued` ou `running` deviennent `interrupted`. Les générations ne sont pas relancées automatiquement : le frontend doit consulter le journal et faire décider l'utilisateur avant toute nouvelle demande. L'exécution sans session reste éphémère et ne peut pas être récupérée après une déconnexion. La persistance dépend de l'activation de la base SQLite facultative.
 
 ## 11. Transport WebSocket
 
@@ -292,10 +291,10 @@ Le protocole JSON comprend :
 - `run.start` ;
 - `run.cancel` ;
 - `approval.resolve` ;
-- `session.save` ;
-- `session.load` ;
-- `session.list` ;
-- `session.delete`.
+- `configuration.save`, `configuration.load`, `configuration.list`, `configuration.delete` ;
+- `session.save`, `session.load`, `session.list`, `session.delete` ;
+- `session.bind`, `session.resume`, `session.archive` ;
+- `session.runs`, `session.run.load`.
 
 ### 11.3. Événements
 
@@ -325,16 +324,18 @@ Les principaux événements sont :
 - `run.completed` ;
 - `run.failed` ;
 - `run.cancelled` ;
+- `run.interrupted` ;
+- `session.run.started`, `session.run.loaded`, `session.runs` ;
 - `session.saved` ;
 - `session.loaded` ;
 - `session.list` ;
 - `session.deleted` ;
-- `session.failed` ;
+- `session.failed`, `session.archive`, `session.resumed`, `session.bound` ;
 - `error`.
 
-Les identifiants de corrélation permettent de rattacher les événements aux demandes concernées.
-Les autorisations des outils sont isolées par connexion WebSocket.
-Le protocole ne garantit pas encore la reprise des événements après une déconnexion.
+Les identifiants de corrélation permettent de rattacher les événements aux demandes concernées. Les autorisations des outils sont isolées par connexion WebSocket.
+À la reconnexion, après une nouvelle authentification, `session.resume` restitue la configuration liée, la fenêtre active et la révision actuelle. `session.run.load` retrouve un run précis grâce au `run_id` original ; `session.runs` restitue jusqu'à 50 entrées par page, avec les curseurs facultatifs `before_created_at` et `before_request_id` à fournir ensemble pour consulter les pages suivantes. Chaque entrée contient son état, son prompt, son erreur éventuelle, sa réponse finale lorsqu'elle a été persistée et sa révision. Le client peut ensuite consulter `session.archive` pour reconstituer les messages anciens.
+Cette récupération fournit un **état durable** et non la répétition des deltas, décisions ou aperçus d'outils déjà envoyés : le rejeu exact des événements WebSocket n'est pas encore implémenté. Toute approbation en attente d'une connexion interrompue est abandonnée ; aucune écriture non approuvée ne doit être publiée.
 
 ## 12. Frontend
 
@@ -363,7 +364,7 @@ Les fonctionnalités suivantes restent à développer :
 - la récupération sémantique ;
 - le comptage exact des tokens selon les modèles ;
 - la découverte des capacités réelles des modèles ;
-- la reprise des événements après reconnexion ;
+- le rejeu complet des événements éphémères après reconnexion ;
 - la reprise d'une exécution après redémarrage ;
 - les historiques d'agents persistants entre exécutions ;
 - les populations évolutionnaires ;
@@ -426,8 +427,8 @@ L'association conserve une copie de la configuration et de sa révision. Une mod
 - une session liée à une configuration.
 
 Dans le cas d'une session liée, le frontend transmet un seul nouveau message utilisateur et la révision attendue de la session.
-Le backend recharge l'historique, ajoute la demande, exécute les agents et enregistre automatiquement la réponse finale après une génération réussie.
-`session.runs` permet de consulter les exécutions terminées, échouées, annulées ou interrompues.
+Le backend recharge l'historique, journalise la demande avant l'attente GPU, exécute les agents et enregistre automatiquement la réponse finale et l'état terminal après une génération réussie.
+`session.runs` permet de consulter les exécutions en attente, en cours, terminées, échouées, annulées ou interrompues. `session.run.load` récupère précisément une exécution par son identifiant original.
 Une génération interrompue n'est pas relancée automatiquement après redémarrage.
 Les anciennes sessions restent lisibles et peuvent être associées à une configuration persistante.
 La fenêtre active conserve au maximum 32 messages.
@@ -435,8 +436,7 @@ Avant chaque nouvelle exécution d'une session liée, le backend archive les mes
 Cette opération est atomique avec l'enregistrement du prompt et du run dans SQLite.
 La conversation complète reste récupérable via `session.archive`, par pages d'au plus 50 messages, dans l'ordre antéchronologique.
 Le curseur exclusif `before_sequence` permet de charger les pages précédentes.
-Le schéma sessions v3 introduit `session_message_archive`. Les bases v1 et v2 sont migrées sans suppression des sessions existantes.
-Une exécution échouée ou annulée après `session.run.started` conserve le prompt enregistré et le statut du run.
-Une interruption brutale est marquée `interrupted` à la réouverture du backend, sans reprise automatique de génération.
+Le schéma sessions v3 introduit `session_message_archive` et le schéma v4 étend le journal avec le résultat final et la révision de session, ainsi que l'état `queued`. Les bases v1, v2 et v3 sont migrées sans suppression des sessions existantes. Les exécutions historiques ne peuvent pas retrouver rétroactivement une réponse ou une révision qui n'avait jamais été enregistrée.
+Une exécution échouée, annulée ou interrompue après sa réservation conserve le prompt et sa révision. Une interruption brutale est marquée `interrupted` à la réouverture du backend, sans reprise automatique de génération. Les transactions SQLite en mode WAL avec synchronisation FULL évitent de publier un succès avant la validation durable de la réponse, mais ne remplacent pas une stratégie de sauvegarde externe. L'ouverture d'une même base simultanément par plusieurs processus backend n'est pas prise en charge par la récupération au démarrage, qui interprète les runs actifs du projet comme ceux d'un processus précédent.
 Une exécution sans session demeure temporaire.
 Le WebSocket existant reste l'unique interface applicative du backend. Aucun CLI supplémentaire n'est introduit.

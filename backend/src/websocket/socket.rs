@@ -1,7 +1,14 @@
 use axum::extract::ws::{Message as WsMessage, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    },
+    time::Duration,
+};
 use tokio::{
     sync::{Mutex, Semaphore, mpsc},
     task::JoinHandle,
@@ -16,7 +23,9 @@ use crate::{
     providers::Client,
     sessions::SessionStore,
     tools::ToolApprovalGate,
-    websocket::{Command, RunExecution, RunRequest, models::list},
+    websocket::{
+        Command, RunExecution, RunRequest, STOP_DISCONNECTED, STOP_USER, models::list,
+    },
 };
 
 fn match_token(provided: &str, expected: &str) -> bool {
@@ -58,6 +67,8 @@ pub(crate) async fn serve(
     }
     let (mut sink, mut stream) = socket.split();
     let (tx, mut rx) = mpsc::channel::<Event>(128);
+    let writer_closed = CancellationToken::new();
+    let writer_closed_task = writer_closed.clone();
     let writer = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
             let Ok(encoded) = serde_json::to_string(&event) else {
@@ -67,12 +78,20 @@ pub(crate) async fn serve(
                 break;
             }
         }
+        writer_closed_task.cancel();
     });
     let _ = tx.send(Event::new("authenticated", "", json!({}))).await;
-    let mut active: Option<(String, CancellationToken, JoinHandle<()>, Option<String>)> = None;
+    let mut active: Option<(
+        String,
+        CancellationToken,
+        JoinHandle<()>,
+        Option<String>,
+        Arc<AtomicU8>,
+    )> = None;
     loop {
         let frame = tokio::select! {
             () = shutdown.cancelled() => break,
+            () = writer_closed.cancelled() => break,
             frame = stream.next() => frame,
         };
         let Some(frame) = frame else {
@@ -108,7 +127,7 @@ pub(crate) async fn serve(
         if value.get("type").and_then(Value::as_str) == Some("run.start") {
             if active
                 .as_ref()
-                .is_some_and(|(_, _, handle, _)| !handle.is_finished())
+                .is_some_and(|(_, _, handle, _, _)| !handle.is_finished())
             {
                 let _ = tx
                     .send(Event::new(
@@ -151,6 +170,7 @@ pub(crate) async fn serve(
             let session_id = request.session_id.clone();
             let request_id = request.request_id.clone();
             let cancel = CancellationToken::new();
+            let stop_reason = Arc::new(AtomicU8::new(0));
             let execution = RunExecution {
                 client: client.clone(),
                 gpu: gpu.clone(),
@@ -161,13 +181,14 @@ pub(crate) async fn serve(
                 memory: memory.clone(),
                 sessions: sessions.clone(),
                 configurations: configurations.clone(),
+                stop_reason: stop_reason.clone(),
             };
             let outbound = tx.clone();
             let task_cancel = cancel.clone();
             let handle = tokio::spawn(async move {
                 execution.execute(request, outbound, task_cancel).await;
             });
-            active = Some((request_id, cancel, handle, session_id));
+            active = Some((request_id, cancel, handle, session_id, stop_reason));
         } else {
             match serde_json::from_value::<Command>(value) {
                 Ok(Command::ModelsList { request_id }) => {
@@ -408,14 +429,51 @@ pub(crate) async fn serve(
                         break;
                     }
                 }
+                Ok(Command::SessionRunLoad {
+                    request_id,
+                    session_id,
+                    run_id,
+                }) => {
+                    let result = match sessions.as_ref() {
+                        Some(store) => store.load_run(session_id, run_id).await,
+                        None => Err(anyhow::anyhow!("Persistance des sessions désactivée")),
+                    };
+                    let event = match result {
+                        Ok(Some(run)) => Event::new(
+                            "session.run.loaded",
+                            &request_id,
+                            json!({ "run": run }),
+                        ),
+                        Ok(None) => Event::new(
+                            "session.failed",
+                            &request_id,
+                            json!({ "error": "Exécution introuvable" }),
+                        ),
+                        Err(error) => Event::new(
+                            "session.failed",
+                            &request_id,
+                            json!({ "error": error.to_string() }),
+                        ),
+                    };
+                    if tx.send(event).await.is_err() {
+                        break;
+                    }
+                }
                 Ok(Command::SessionRuns {
                     request_id,
                     session_id,
+                    before_created_at,
+                    before_request_id,
                 }) => {
-                    let result = match sessions.as_ref() {
-                        Some(store) => store.runs(session_id).await,
-
-                        None => Err(anyhow::anyhow!("Persistance des sessions désactivée")),
+                    let cursor = match (before_created_at, before_request_id) {
+                        (None, None) => Ok(None),
+                        (Some(created_at), Some(run_id)) => Ok(Some((created_at, run_id))),
+                        _ => Err(anyhow::anyhow!("Curseur d'exécution incomplet")),
+                    };
+                    let result = match (sessions.as_ref(), cursor) {
+                        (Some(store), Ok(before)) => store.runs(session_id, before).await,
+                        (None, _) => Err(anyhow::anyhow!("Persistance des sessions désactivée")),
+                        (_, Err(error)) => Err(error),
                     };
                     let event = match result {
                         Ok(runs) => Event::new("session.runs", &request_id, json!({"runs": runs})),
@@ -543,7 +601,10 @@ pub(crate) async fn serve(
                     }
                 }
                 Ok(Command::RunCancel { request_id }) => match &active {
-                    Some((id, cancel, handle, _)) if id == &request_id && !handle.is_finished() => {
+                    Some((id, cancel, handle, _, stop_reason))
+                        if id == &request_id && !handle.is_finished() =>
+                    {
+                        stop_reason.store(STOP_USER, Ordering::Release);
                         cancel.cancel();
                     }
                     _ => {
@@ -565,7 +626,7 @@ pub(crate) async fn serve(
                     approved,
                     preview_sha256,
                 }) => {
-                    let belongs_to_run = active.as_ref().is_some_and(|(id, _, handle, _)| {
+                    let belongs_to_run = active.as_ref().is_some_and(|(id, _, handle, _, _)| {
                         id == &request_id && !handle.is_finished()
                     });
                     let resolved = if belongs_to_run {
@@ -605,22 +666,27 @@ pub(crate) async fn serve(
             }
         }
     }
-    if let Some((request_id, token, mut handle, session_id)) = active {
+    if let Some((request_id, token, mut handle, session_id, stop_reason)) = active {
+        let _ = stop_reason.compare_exchange(
+            0,
+            STOP_DISCONNECTED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
         token.cancel();
-        if time::timeout(Duration::from_secs(5), &mut handle)
-            .await
-            .is_err()
-        {
+        if time::timeout(Duration::from_secs(5), &mut handle).await.is_err() {
             handle.abort();
+            // L'abandon du task Rust ne doit pas laisser un run réservé
+            // indéfiniment dans SQLite, même s'il attendait le GPU.
             if let (Some(session_id), Some(store)) = (session_id, sessions.as_ref()) {
-                let _ = store
-                    .fail_run(
-                        session_id,
-                        request_id,
-                        true,
-                        "Connexion WebSocket interrompue".to_owned(),
-                    )
-                    .await;
+                let cancelled = stop_reason.load(Ordering::Acquire) == STOP_USER;
+                let status = if cancelled { "cancelled" } else { "interrupted" };
+                let _ = store.fail_run(
+                    session_id,
+                    request_id,
+                    status,
+                    "Connexion WebSocket interrompue".to_owned(),
+                ).await;
             }
         }
     }

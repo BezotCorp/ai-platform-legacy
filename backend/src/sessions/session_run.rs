@@ -7,6 +7,8 @@ pub(crate) struct SessionRun {
     pub status: String,
     pub prompt: String,
     pub error: Option<String>,
+    pub result: Option<String>,
+    pub session_revision: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -18,8 +20,10 @@ impl SessionRun {
             status: row.get(1)?,
             prompt: row.get(2)?,
             error: row.get(3)?,
-            created_at: row.get(4)?,
-            updated_at: row.get(5)?,
+            result: row.get(4)?,
+            session_revision: row.get(5)?,
+            created_at: row.get(6)?,
+            updated_at: row.get(7)?,
         })
     }
 }

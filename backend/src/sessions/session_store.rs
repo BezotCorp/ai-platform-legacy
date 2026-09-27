@@ -24,7 +24,7 @@ impl SessionStore {
                          error = 'Backend arrêté pendant une exécution',
                          updated_at = unixepoch()
                      WHERE project = ?1
-                       AND status = 'running'",
+                       AND status IN ('queued', 'running')",
                     params![scope],
                 )?;
                 Ok(())
@@ -87,7 +87,7 @@ impl SessionStore {
                                FROM session_runs
                                WHERE project = ?1
                                  AND session_id = ?2
-                                 AND status = 'running'
+                                 AND status IN ('queued', 'running')
                            )",
                         params![project, id, encoded, expected_revision,],
                     )?
@@ -205,7 +205,7 @@ impl SessionStore {
                                FROM session_runs
                                WHERE project = ?1
                                  AND session_id = ?2
-                                 AND status = 'running'
+                                 AND status IN ('queued', 'running')
                            )",
                     params![project, id, expected_revision,],
                 )?;

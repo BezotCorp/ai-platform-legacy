@@ -7,7 +7,7 @@ mod server_state;
 mod socket;
 
 pub(crate) use command::Command;
-pub(crate) use run_execution::RunExecution;
+pub(crate) use run_execution::{RunExecution, STOP_DISCONNECTED, STOP_USER};
 pub(crate) use run_request::RunRequest;
 pub(crate) use server::run;
 pub(crate) use server_state::ServerState;
