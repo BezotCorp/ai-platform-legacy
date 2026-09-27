@@ -1,6 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::agents::AgentConfig;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(transparent)]
 pub(crate) struct AgentLayer {
     pub agents: Vec<AgentConfig>,
 }
@@ -10,6 +13,7 @@ impl AgentLayer {
         if agents.is_empty() {
             return Err("An agent layer cannot be empty");
         }
+
         Ok(Self { agents })
     }
 }

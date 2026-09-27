@@ -1,496 +1,448 @@
 # Architecture — BezotCorp AI Platform
 
-Statut : décisions de conception du 24 septembre 2026. Ce document distingue les invariants adoptés des options restant à valider. Il ne prétend pas que les fonctionnalités sont déjà implémentées.
+## 1. Objectif
 
-## Objectif et limites
+BezotCorp AI Platform est une plateforme locale d'agents de développement dont le backend est écrit en Rust. Elle utilise actuellement Ollama et doit pouvoir accueillir d'autres fournisseurs de modèles.
 
-Construire un agent de développement Rust, utilisable avec des modèles locaux (notamment Ollama) et ultérieurement d'autres fournisseurs. Il doit fonctionner sur une machine dotée d'au plus 16 Go de VRAM : priorité aux modèles compatibles avec ce budget, à l'exécution séquentielle, aux recherches ciblées, aux caches et à la persistance du travail. **Ne jamais assimiler ces optimisations à 100 Go de VRAM ou à la qualité garantie d'un modèle plus grand.** Mesurer résultats et ressources.
+Elle permet à un ou plusieurs agents de travailler sur un projet logiciel avec :
 
-## Principes non négociables
+- un accès contrôlé aux fichiers ;
+- des outils de lecture et d'écriture ;
+- une gestion centralisée du contexte ;
+- une mémoire conversationnelle persistante ;
+- des sessions sauvegardées ;
+- une orchestration mono-agent, MoA, supervisée ou populationnelle ;
+- une interface de communication WebSocket.
 
-1. Un moteur d'agent commun aux modes mono-IA et MoA (Mixture of Agents), sélectionnables depuis le frontend. Un MoA orchestre des agents complets pouvant avoir des rôles, instructions, modèles, permissions et contextes différents. **Ce n'est pas un MoE** : aucun routage des experts neuronaux internes d'un modèle par notre orchestrateur.
-2. Le modèle peut demander des outils ; seul le backend valide, autorise, exécute et retourne les résultats. Les outils proviennent du registre natif et/ou de clients MCP vers un ou plusieurs serveurs. Ne jamais supposer qu'un modèle sait appeler correctement les outils.
-3. Le gestionnaire de contexte réside dans le backend Rust, indépendamment de la stratégie d'orchestration, du fournisseur IA, du stockage et de MCP. Un adaptateur MCP peut exposer ses opérations à des clients externes ; les composants internes l'appellent directement.
-4. Une mémoire persistante commune est consultable à la demande. Chaque agent conserve son historique et son contexte de travail privés. L'orchestrateur conserve tâches, dépendances et références, **pas** nécessairement le contenu intégral des travaux de tous les agents.
-5. Le code réel et la version Git sont les sources de vérité pour le contenu des fichiers. Une proposition ou un résumé d'agent n'est pas une vérité. Toute entrée de mémoire porte une provenance, une version/révision si pertinente, un statut (observation, hypothèse, proposition, décision ou obsolète), des permissions et un lien vers sa source originale.
-6. Le prompt système est minimal mais doit toujours contenir le rôle, les contraintes essentielles de sécurité et le contrat des outils. Le contexte est sélectionné à la demande, selon la tâche et le budget de chaque modèle. **Minimal ne veut pas dire insuffisant** : possibilité de récupérer les extraits complets si nécessaire.
-7. Ne jamais laisser une IA seule garantir autorisations, fraîcheur du contenu, intégrité des versions, budgets ou coordination des écritures : ces règles sont imposées par du Rust déterministe. Les modèles peuvent aider à reformuler la recherche, classer et synthétiser, mais leurs résultats restent vérifiables.
-8. Les opérations destructrices, écritures sensibles et commandes nécessitent une politique d'autorisation explicite. Le contenu récupéré via fichiers ou MCP est une donnée non fiable, jamais une instruction système.
+L'architecture vise notamment les machines disposant d'au plus 16 Go de VRAM. L'exécution séquentielle, la sélection du contexte et la persistance limitent les besoins matériels sans remplacer les capacités d'un modèle plus grand.
 
-## Exécution
+## 2. Principes fondamentaux
 
-- `ExecutionMode::Single` : un agent, le moteur de contexte, le registre d'outils et les mêmes mécanismes de sécurité.
-- `ExecutionMode::Mixture` : une ou plusieurs couches d'agents de proposition, suivies d'un agrégateur ; rôles et modèles configurables par agent. Les agents d'une couche peuvent travailler indépendamment, publier des résultats sourcés et consulter sélectivement les sorties antérieures ; l'agrégateur peut demander des vérifications.
-- Une exécution MoA n'implique **pas** plusieurs modèles simultanément en VRAM. Le planificateur pourra exécuter les rôles successivement et réutiliser le même modèle ; les modèles différents pourront être chargés à tour de rôle.
-- Les outils de lecture peuvent être exécutés en parallèle lorsque c'est sûr ; les modifications concurrentes d'une même ressource nécessitent coordination, validation de version et absence de pertes silencieuses.
+### 2.1. Source de vérité
 
-## Context Engine
+Le contenu réel des fichiers et leur état Git constituent les sources de vérité du projet.
+Les réponses des modèles, les propositions d'autres agents et les souvenirs sont des informations susceptibles d'être incomplètes ou obsolètes.
+Les données mémorisées doivent conserver leur provenance et, lorsque cela est pertinent, une version ou une révision. Les informations qui nécessitent une vérification doivent être confrontées à leur source originale.
+Un agent ne doit pas considérer un résumé comme une preuve de l'état actuel d'un fichier.
 
-Pipeline : `requête + rôle + permissions + budget` -> récupération textuelle/symbolique (plus tard sémantique) -> filtrage d'accès et fraîcheur -> classement -> sélection sous budget -> assemblage avec provenance. Conserver une marge pour les outils et la réponse ; mesurer le nombre réel de tokens avec un tokenizer adapté au modèle quand disponible. Les heuristiques de longueur ne sont que des approximations explicites.
+### 2.2. Responsabilités du backend
 
-- Prioriser le code original et les diagnostics exacts pour toute correction ; les résumés servent à orienter la recherche et ne remplacent pas un extrait de code nécessaire.
-- Une recherche qui ne trouve rien doit pouvoir retourner « aucune donnée » plutôt qu'une invention.
-- Les résultats de compilation/tests sont datés et associés à une révision. Une modification ultérieure peut les rendre obsolètes.
-- Rechercher par identifiants stables, chemins, symboles et références exactes ; ajouter ensuite recherche sémantique, reranking neuronal facultatif et index vectoriel via interfaces distinctes.
-- Appliquer les plafonds sur résultats, octets/tokens, appels et temps. Une sélection tronquée doit être annoncée et permettre une récupération complémentaire.
+Le backend Rust applique de manière déterministe :
 
-## Stockage et accès IA
+- la validation des appels d'outils ;
+- les permissions ;
+- les limites de ressources ;
+- les budgets de contexte ;
+- les contrôles de version ;
+- la coordination des écritures ;
+- l'annulation des exécutions ;
+- l'orchestration des agents.
 
-SQLite est le premier candidat pour la mémoire durable locale : migrations explicites, transactions courtes, WAL si adapté, intégrité et stratégie de sauvegarde. FTS5 pour la recherche textuelle, à vérifier dans le runtime retenu. Les fichiers Git restent hors de SQLite, référencés par chemin, révision et éventuellement empreinte. Une couche `MemoryStore` doit permettre de remplacer le stockage sans changer les agents.
+Les modèles demandent des actions, mais ne déterminent pas leurs propres autorisations.
+Les données provenant des fichiers, de la mémoire, des outils et des futurs serveurs MCP sont considérées comme non fiables. Elles ne doivent jamais être promues en instructions système.
 
-Les IA n'exécutent pas de SQL arbitraire. Elles appellent des outils métier à schémas stricts : recherche, récupération ciblée, publication d'observation, consultation des décisions et historique. Le backend vérifie autorisations, tailles, accès et version. Les opérations MCP n'augmentent jamais les permissions de leur appelant.
+### 2.3. Services communs
 
-## Incertitudes et décisions différées
+Les différents modes d'exécution utilisent les mêmes services de contexte, de mémoire, d'exécution et d'autorisation.
+Le gestionnaire de contexte appartient au backend et reste indépendant du fournisseur IA, du transport WebSocket, du stockage et de MCP.
+Les futurs adaptateurs MCP devront réutiliser les services internes du backend sans dupliquer les règles métier.
 
-- Fournisseur HTTP/framework, schémas JSON, client MCP Rust et versions de crates : à retenir après examen du code et des API actuelles.
-- Embeddings, index vectoriel et modèle de reranking : seulement après mesure sur des tâches réelles et évaluation de leur coût VRAM.
-- Modalités de coordination plus élaborées que le MoA en couches (délégation, reprises, négociation) : extensibles, non présumées implémentées.
-- Politique fine des permissions, persistance des sessions, backend/frontend en streaming et reprise après crash : à spécifier avant mise en production.
+## 3. Organisation du projet
 
-## Jalons et critères de validation
+Le projet comprend trois parties :
 
-1. **Contrats testés** : configuration mono/MoA, budgets de contexte, provenance, registre des outils ; tests unitaires sans modèle ni réseau.
-2. **Premier chemin complet** : backend -> Ollama -> éventuelle demande d'outil -> vérification -> exécution -> retour au modèle ; prise en charge explicite des modèles sans tool calling.
-3. **Mémoire persistante** : SQLite derrière `MemoryStore`, provenance, recherches et invalidation suite à modification de fichiers.
-4. **MCP** : connexions configurées à plusieurs serveurs, découverte, validation des schémas, appel contrôlé ; serveur/adaptateur de contexte seulement si utile aux clients externes.
-5. **MoA réel** : rôles distincts, couches, agrégateur et orchestration séquentielle, mêmes outils et moteur de contexte que le mode mono.
-6. **Frontend** : choix du mode, des rôles/modèles, visibilité des appels et permissions ; traitement d'erreurs.
-7. **Évaluation** : sur les mêmes tâches Rust, mesurer exactitude (tests), tokens, latence, pics de VRAM, collisions d'écriture et comportement en contexte insuffisant.
+- `backend/` : moteur Rust et services internes ;
+- `frontend/` : future application graphique ;
+- `mcp/` : futures intégrations MCP.
 
-**Règle de travail :** toute modification d'architecture revoit ce document et les tests correspondants. Ne pas marquer « implémenté » ce qui n'est que prévu. Ne jamais pousser directement sur `main` ou `dev` : développement sur `feature/backend-agent`, puis PR vers `dev`.
+Le backend est un exécutable Rust dont le point d'entrée est `backend/src/main.rs`.
 
-## Arborescence du backend
+Ses principaux modules sont :
 
-Le backend est un exécutable Rust dont le point
-d'entrée est `backend/src/main.rs`.
+| Module                  | Responsabilité                                                |
+| ----------------------- | ------------------------------------------------------------- |
+| `providers/`            | Fournisseurs de modèles et Ollama                             |
+| `agents/`               | Configuration et exécution des agents                         |
+| `agents/orchestration/` | Modes d'exécution, supervision et populations                 |
+| `agents/context/`       | Récupération, sélection, assemblage et compaction du contexte |
+| `agents/memory/`        | Mémoire conversationnelle persistante                         |
+| `tools/`                | Outils natifs, registre et autorisations                      |
+| `sessions/`             | Messages, historiques et sessions persistantes                |
+| `sqlite/`               | Infrastructure SQLite générique                               |
+| `websocket/`            | Commandes, connexions et serveur WebSocket                    |
 
-Les modules sont organisés par responsabilité :
+Les fichiers `event.rs` et `file_manager.rs` sont situés directement dans `backend/src/`.
+L'infrastructure SQLite est indépendante des schémas métier. Les opérations propres à la mémoire et aux sessions restent dans leurs modules respectifs.
 
-- `providers` : fournisseurs de modèles et Ollama.
-- `agents` : agents et orchestration mono-IA/MoA.
-- `context` : récupération et assemblage du contexte.
-- `memory` : mémoire persistante et stockage SQLite.
-- `tools` : outils natifs, registre et permissions.
-- `sessions` : sessions et conversations.
-- `api` : interface du backend avec le frontend.
+## 4. Agents et orchestration
 
-Les intégrations MCP pourront utiliser les services
-communs du backend. Les dossiers racine `mcp/`
-et `frontend/` restent disponibles pour leur
-développement dans VS Code.
+### 4.1. Configuration canonique
 
-### Conventions Rust
+`AgentConfig` décrit l'identité, le rôle, les instructions, le fournisseur et le modèle d'un agent.
+`ExecutionMode` constitue l'entrée commune du moteur.
+Il distingue un agent unique d'une architecture multi-agents.
+Les configurations métier prennent en charge Serde. Elles ne dépendent pas du protocole WebSocket.
 
-- `main.rs` est le point d'entrée.
-- Aucun `lib.rs` n'est prévu pour cet exécutable.
-- Chaque fichier possède une responsabilité précise.
-- Les noms des fichiers contenant une structure ou
-  une énumération correspondent à leur nom Rust
-  converti en snake_case.
-- Les fichiers `mod.rs` déclarent leurs sous-modules.
+### 4.2. Stratégies multi-agents
 
-### État
+`MultiAgentStrategy` comporte actuellement trois stratégies :
 
-L'arborescence et les déclarations des modules sont
-créées. Les fonctionnalités ne sont pas encore
-implémentées.
+- `LayeredMoa` : plusieurs couches d'agents, suivies d'un agrégateur final ;
+- `Supervised` : un superviseur choisit les travailleurs, leur délègue des tâches et décide quand conclure ;
+- `Population` : plusieurs agents collaborent pendant plusieurs tours, puis un facilitateur produit la synthèse.
 
-Aucun test n'est créé.
+Les identifiants des participants sont validés pour éviter les doublons dans une même architecture.
 
-Le code n'est pas considéré comme compilé ou validé
-par cette opération.
+### 4.3. Population collaborative
 
-## Configuration des agents — première implémentation
+Une population possède entre deux et quatre agents, un facilitateur distinct et entre un et quatre tours.
 
-Le modèle est identifié par son fournisseur et son nom.
-Un même modèle peut être partagé par plusieurs agents.
+Sa politique de participation lui appartient :
 
-Chaque agent possède un identifiant unique dans son
-exécution et un rôle configurable avec ses instructions.
+- `Fixed` : tous les agents participent à chaque tour ;
+- `Adaptive` : le facilitateur sélectionne les agents de chaque tour entre `min_agents` et `max_agents`.
 
-Le mode mono-IA contient un agent.
+Chaque agent conserve son propre historique pendant l'exécution.
+Les contributions du tour précédent sont transmises aux participants du tour suivant comme informations non vérifiées.
+Les contributions échangées sont limitées à 240 caractères par agent. Le facilitateur reçoit les contributions du dernier tour pour sa synthèse.
+Les historiques individuels ne sont pas encore persistés entre plusieurs exécutions.
+La sélection adaptative utilise les rôles disponibles et des rapports récents limités en taille. Elle ne constitue pas un mécanisme évolutionnaire.
 
-Le mode MoA contient une ou plusieurs couches d'agents
-et un agrégateur final. Les identifiants des participants
-doivent être uniques. Plusieurs rôles peuvent utiliser
-le même modèle.
+### 4.4. Supervision autonome
 
-Le planificateur fournit l'ordre logique des couches.
-Il n'exécute pas encore les modèles.
+Le superviseur peut déléguer successivement plusieurs tâches aux travailleurs configurés, examiner leurs rapports et produire une réponse finale.
+Chaque travailleur conserve son historique pendant l'exécution.
+Les délégations et les décisions restent limitées par la configuration.
+Il n'existe pas encore de délégation hiérarchique permettant à un superviseur de lancer une population ou un autre superviseur comme sous-architecture.
 
-Le budget de contexte distingue capacité, prompt
-système, génération et réserve pour les outils.
-Le comptage exact dépendra du fournisseur.
+### 4.5. Exécution et ressources
 
-Cette première implémentation ne réalise pas encore
-les appels Ollama, l'exécution MoA, MCP ou le stockage.
+Les générations sont séquentielles. Un sémaphore global limite à une le nombre d'exécutions utilisant le GPU simultanément dans un processus backend.
+`AgentExecution` choisit le moteur adapté au mode.
+`AgentTurn` réalise la génération et les cycles d'utilisation des outils.
+Le contexte, les outils, les approbations, l'annulation et la mémoire sont mutualisés.
+Les contributions des autres agents et les souvenirs restent des données non fiables.
+Ils ne remplacent jamais une vérification des fichiers réels.
 
-Aucun test n'a été ajouté. Compilation non vérifiée.
+### 4.6. Capacités non implémentées
 
-## Transport frontend — WebSocket
+Les populations évolutionnaires, les mutations, la sélection intergénérationnelle, les échanges directs entre agents hors des tours collaboratifs et la persistance des historiques individuels restent à développer.
 
-Le frontend démarre le binaire Rust. Le backend ne
-propose aucune interface CLI, REST ou SSE destinée
-à l'application.
+## 5. Fournisseurs de modèles
 
-Le point d'entrée `main.rs` démarre directement
-le serveur WebSocket.
+Ollama est le fournisseur actuellement intégré.
+Le client HTTP est asynchrone et transmet les réponses en streaming au backend.
+La plateforme peut découvrir les modèles disponibles et configurer les paramètres de contexte et de génération.
+Les valeurs configurées ne prouvent pas que le modèle sélectionné accepte réellement la fenêtre de contexte demandée. La découverte et la validation systématique de ces capacités restent à développer.
+L'architecture prévoit l'ajout d'autres fournisseurs sans réimplémenter les services d'orchestration, de contexte et d'autorisation.
+Un modèle ne prenant pas en charge les appels d'outils ne doit pas provoquer l'exécution silencieuse d'une action non reconnue.
 
-### Démarrage
+## 6. Gestion du contexte
 
-Le frontend fournit les variables d'environnement :
+Le gestionnaire de contexte est commun à toutes les stratégies d'exécution.
+Il assemble les instructions de l'agent, la demande utilisateur, les messages historiques pertinents, les contributions des couches précédentes, les souvenirs récupérés et les échanges avec les outils.
 
-- `AI_PLATFORM_TOKEN` : secret aléatoire fort.
-- `AI_PLATFORM_ORIGIN` : origine exacte du frontend.
-- `OLLAMA_HOST` : URL Ollama facultative.
+### 6.1. Sélection et provenance
 
-Le backend écoute exclusivement sur `127.0.0.1`.
+Le dernier message utilisateur, les instructions du rôle et les contributions MoA obligatoires sont conservés.
+Les messages historiques facultatifs sont sélectionnés selon leur pertinence lexicale et leur récence, puis replacés dans leur ordre chronologique d'origine.
+Les souvenirs persistants peuvent compléter ce contexte. Ils restent des informations historiques non vérifiées.
+Les événements `context.prepared` exposent les informations de sélection et de provenance utiles au frontend.
+La sélection actuelle est lexicale. Elle ne constitue pas une recherche sémantique et ne garantit pas la découverte de toutes les dépendances d'un projet.
 
-Le système attribue un port disponible.
+### 6.2. Budget
 
-Le backend écrit une ligne JSON contenant son URL
-WebSocket sur stdout, pour son processus parent.
+Le budget de contexte réserve de l'espace pour les instructions, les définitions d'outils et la génération.
+Si les éléments obligatoires dépassent le budget disponible, la génération est refusée sans troncature silencieuse.
+Le comptage actuel repose sur une estimation liée aux octets UTF-8. Il ne constitue pas un comptage exact des tokens du modèle.
 
-Le frontend doit s'authentifier avant toute commande.
+### 6.3. Compaction
 
-### Protocole
+`ToolContext` conserve les échanges complets avec les outils et prépare le contexte avant chaque nouvelle génération.
+Lorsque le budget est saturé, il peut condenser d'anciens tours de lecture terminés et retirer des échanges historiques facultatifs.
+Les échanges contenant une écriture ne sont pas compactés.
+Les registres compacts conservent les métadonnées utiles, mais ne remplacent pas le contenu original. Un agent doit récupérer à nouveau les données absentes avant toute opération qui nécessite leur vérification.
+L'événement `context.compacted` expose les compactions et omissions réalisées.
+Si les données obligatoires ou les échanges d'écriture excèdent encore la fenêtre disponible, l'exécution échoue explicitement.
 
-Tous les messages applicatifs sont au format JSON.
+## 7. Outils et accès au projet
 
-Commandes :
+### 7.1. Outils natifs
 
-- `authenticate`
-- `models.list`
-- `run.start`
-- `run.cancel`
+Les outils de lecture actuellement disponibles sont :
 
-Événements :
+- `project.list_files` ;
+- `project.read_file` ;
+- `project.search_text`.
 
-- `authenticated`
-- `models.list`
-- `run.queued`
-- `run.started`
-- `agent.started`
-- `agent.delta`
-- `agent.completed`
-- `run.completed`
-- `run.failed`
-- `run.cancelled`
-- `error`
+Les outils d'écriture sont :
 
-Les demandes d'exécution comprennent un identifiant
-de corrélation et la configuration mono-IA ou MoA.
+- `project.replace_text` ;
+- `project.create_file`.
 
-### Exécution
+Le nombre de tours de génération et le nombre total d'appels d'outils sont bornés.
+Aucun outil de suppression de fichier ni aucune exécution arbitraire de commandes système ne sont actuellement exposés aux modèles.
 
-Le backend utilise le planificateur déjà défini.
+### 7.2. Accès aux fichiers
 
-En mode mono-IA, un seul agent est exécuté.
+Le répertoire autorisé est fourni au backend par `AI_PLATFORM_PROJECT_ROOT`.
+Les outils utilisent `FileManager` et `cap-std` pour accéder aux fichiers relativement à ce répertoire.
+Les traversées interdites, certains répertoires sensibles et les liens symboliques rencontrés pendant l'exploration sont refusés.
+Les lectures et recherches sont soumises à des limites de taille et de nombre de résultats.
+Ces protections applicatives ne constituent pas un sandbox complet du processus et ne suppriment pas toutes les courses possibles avec des processus extérieurs.
 
-En mode MoA, les couches sont exécutées
-successivement, puis l'agrégateur.
+### 7.3. Autorisations
 
-Les agents peuvent partager un modèle Ollama.
+Les lectures sont autorisées automatiquement par défaut. `AI_PLATFORM_APPROVE_READS=1` permet d'exiger une autorisation explicite pour chacune d'elles.
+Toute écriture exige une approbation explicite.
+Le backend prépare la modification, publie son aperçu avec `tool.preview` puis émet `approval.required`.
+Le frontend transmet sa décision avec `approval.resolve`. Lorsqu'une écriture est concernée, l'autorisation est liée à l'empreinte de l'aperçu présenté.
+L'approbation porte exclusivement sur la proposition préparée.
 
-Un sémaphore global limite cette implémentation
-à une génération simultanée par processus.
+### 7.4. Publication des écritures
 
-Le client HTTP Ollama est asynchrone.
+`project.replace_text` exige l'empreinte SHA-256 du fichier original et une occurrence unique du texte à remplacer.
+`project.create_file` refuse de remplacer une destination existante.
+Un verrou partagé coordonne les écritures réalisées par le backend.
+La version du fichier est recontrôlée avant publication. Les fichiers temporaires sont créés dans le répertoire de destination et synchronisés avant leur publication atomique.
+Ces contrôles ne garantissent pas l'absence absolue de courses avec un processus extérieur.
 
-Le streaming est retransmis au frontend par WebSocket.
+## 8. Infrastructure SQLite
 
-Les appels d'outils non encore raccordés ne sont
-jamais exécutés silencieusement.
+Le module `sqlite/` fournit une infrastructure générique indépendante des domaines métier.
 
-### Limites actuelles
+Il comprend :
 
-Cette étape ne termine pas l'application.
-
-Ne sont pas encore raccordés :
-
-- Le frontend graphique et son lanceur.
-- Les serveurs MCP et les outils.
-- Les autorisations détaillées des opérations.
-- La mémoire SQLite persistante.
-- La récupération intelligente du contexte.
-- La reprise des événements après reconnexion.
-- La gestion avancée de résidence GPU.
-
-Les limites de taille du transport ne remplacent
-pas un budget de contexte calculé en tokens.
-
-Aucun test n'a été créé.
-
-La compilation Rust doit être vérifiée séparément.
-
-## Assemblage du contexte — première intégration
-
-Le moteur d'exécution utilise ContextBudget avant
-chaque génération Ollama.
-
-Configuration facultative fournie au lancement
-par le frontend :
-
-- AI_PLATFORM_NUM_CTX : 4096 par défaut.
-- AI_PLATFORM_NUM_PREDICT : 768 par défaut.
-
-Ces paramètres sont transmis à Ollama via
-num_ctx et num_predict.
-
-L'assembleur préserve le dernier message utilisateur
-et les propositions de la couche MoA précédente.
-
-Il sélectionne les messages historiques récents
-dans la limite du budget disponible.
-
-Il refuse la génération lorsque les informations
-obligatoires dépassent ce budget.
-
-L'événement WebSocket context.prepared expose
-les limites, le volume estimé et le nombre de
-messages historiques retenus ou écartés.
-
-Le comptage utilise une estimation basée sur
-les octets UTF-8. Il ne s'agit pas d'un comptage
-exact des tokens propre au modèle.
-
-Les limites configurées ne prouvent pas que le
-modèle sélectionné accepte réellement cette
-fenêtre de contexte. La découverte de cette
-capacité reste à raccorder.
-
-La récupération depuis SQLite, les outils MCP
-et l'indexation sémantique restent à implémenter.
-
-
-## Outils natifs — première intégration
-
-Trois outils de lecture sont maintenant disponibles :
-
-- `project.list_files`
-- `project.read_file`
-- `project.search_text`
-
-Le frontend doit fournir `AI_PLATFORM_PROJECT_ROOT`
-au lancement du backend.
-
-Le backend résout ce chemin et interdit aux outils
-l'accès à des fichiers situés en dehors de ce projet.
-
-Les chemins absolus, la traversée avec `..`,
-les liens symboliques rencontrés pendant l'exploration
-et plusieurs répertoires sensibles sont interdits.
-
-Les recherches et lectures possèdent des limites
-explicites de taille et de nombre de résultats.
-
-Le modèle reçoit les définitions JSON des outils.
-Le backend reçoit ses appels, valide leurs arguments,
-exécute les opérations autorisées, lui retourne
-les résultats, puis reprend la génération.
-
-Le nombre de tours et d'appels d'outils est limité.
-Les résultats sont traités comme des données
-non fiables et ne sont pas promus en instructions.
-
-### Autorisations WebSocket
-
-La variable facultative `AI_PLATFORM_APPROVE_READS=1`
-impose une autorisation avant chaque outil de lecture.
-
-Le backend émet `approval.required` avec le
-`request_id`, le `call_id`, l'agent, le nom de l'outil
-et les arguments exacts.
-
-Le frontend répond :
-
-`{"type":"approval.resolve","request_id":"...","call_id":"...","approved":true}`
-
-L'autorisation expire après 120 secondes.
-L'annulation de l'exécution annule également
-la demande en attente.
-
-Lorsque cette variable est absente ou vaut zéro,
-les trois outils de lecture sont autorisés
-automatiquement, dans les limites du projet.
-
-Aucun outil d'écriture ni aucune commande système
-n'est accessible aux modèles.
-
-### Limites
-
-Cette intégration ne comprend pas encore :
-
-- les serveurs MCP ;
-- les outils d'écriture et leurs autorisations ;
-- la mémoire SQLite ;
-- le comptage exact des tokens ;
-- la persistance des événements WebSocket.
+- une connexion d'écriture ;
+- des connexions de lecture dédiées ;
+- des opérations exécutées hors des threads asynchrones de Tokio ;
+- des transactions ;
+- le mode WAL ;
+- une vérification d'intégrité à l'ouverture ;
+- un état de santé partagé ;
+- une coordination de l'arrêt.
+
+Les modules métier transmettent leurs opérations à cette infrastructure.
+La mémoire conversationnelle et les sessions réutilisent le même gestionnaire lorsqu'elles partagent une base.
+L'ouverture crée directement les tables actuelles de mémoire, configurations, sessions, archivage et exécutions dans une transaction unique avant de démarrer les lecteurs. Aucun schéma historique ni migration n'est embarqué tant que le projet n'a pas de bases persistantes à préserver. Le gestionnaire doit tenir compte des opérations engagées et des références actives lors de sa fermeture.
+
+## 9. Mémoire conversationnelle
+
+La mémoire persistante est facultative. Elle est activée en fournissant `AI_PLATFORM_MEMORY_DB`.
+Le chemin doit être absolu et situé hors du répertoire du projet autorisé. Son répertoire parent doit déjà exister.
+La base n'est actuellement ni chiffrée ni synchronisée avec un service distant.
+Les souvenirs sont isolés par projet. Chaque entrée contient notamment une question, un contenu, une source, une empreinte, une révision et des horodatages.
+Après une exécution réussie, la mémoire peut enregistrer la dernière question utilisateur et la réponse finale.
+Avant la génération de chaque agent, elle recherche des souvenirs pertinents pour la demande et les instructions du rôle.
+La récupération actuelle est lexicale. Elle n'utilise ni embeddings ni index vectoriel.
+Les souvenirs sont présentés comme des données historiques non vérifiées. Ils ne constituent jamais une preuve de l'état actuel du code.
+Une erreur de récupération ou d'enregistrement est signalée par `memory.failed`, sans transformer automatiquement une réponse déjà produite en échec.
+La politique de rétention, la sauvegarde et la synchronisation restent à définir.
+
+## 10. Sessions et conversations
+
+Les sessions permettent de conserver les conversations entre plusieurs utilisations de la plateforme.
+`Message` représente un message conversationnel.
+`History` regroupe les messages d'une session et centralise leur validation.
+`Session` contient l'identifiant, la révision et les horodatages.
+`SessionStore` assure l'enregistrement, la récupération, la liste et la suppression des sessions.
+Les sessions utilisent l'infrastructure SQLite commune, avec leur propre schéma métier. Elles sont isolées par projet.
+
+### 10.1. Contrôle des révisions
+
+La création d'une session attend la révision `0`.
+La modification d'une session existante exige sa révision actuelle. Une révision obsolète provoque un conflit explicite plutôt qu'un écrasement silencieux.
+La suppression exige également la révision attendue.
+Les opérations de liste sont bornées.
+
+### 10.2. Intégration aux exécutions
+
+Les sessions et la mémoire conversationnelle remplissent des fonctions distinctes.
+Une session conserve un historique explicite. La mémoire conserve des informations réutilisables entre les exécutions.
+Une exécution temporaire fournit directement ses messages et n'est pas enregistrée dans SQLite. Une exécution liée à une session reçoit uniquement son nouveau message utilisateur et la révision attendue. Dans une transaction SQLite unique, le backend archive les anciens messages si nécessaire, enregistre le prompt, incrémente la révision et réserve une entrée de journal en état `queued` **avant l'attente du GPU**. Les autres connexions ne peuvent ni lancer un second run sur cette session, ni modifier son historique ou sa configuration tant qu'un run est `queued` ou `running`.
+Après acquisition du GPU, l'état devient `running`. Une réussite enregistre la réponse finale, l'état `completed`, le résultat et la nouvelle révision de session dans une transaction unique ; `run.completed` n'est émis qu'après la confirmation de cette transaction. Une erreur, une annulation explicite ou la perte de connexion entraîne respectivement un état `failed`, `cancelled` ou `interrupted`. Le prompt déjà enregistré et la révision obtenue au début du run sont conservés. Une annulation pendant l'attente du GPU est journalisée et ne démarre pas la génération.
+Au redémarrage, les entrées demeurées `queued` ou `running` deviennent `interrupted`. Les générations ne sont pas relancées automatiquement : le frontend doit consulter le journal et faire décider l'utilisateur avant toute nouvelle demande. L'exécution sans session reste éphémère et ne peut pas être récupérée après une déconnexion. La persistance dépend de l'activation de la base SQLite facultative.
+
+## 11. Transport WebSocket
+
+Le frontend doit lancer le backend comme processus enfant.
+Le backend écoute exclusivement sur `127.0.0.1`, sur un port attribué par le système. Il publie son URL WebSocket sur stdout sous forme d'une ligne JSON, sans exposer le jeton secret.
+Il vérifie l'origine des connexions et exige une authentification avant toute commande applicative. Au signal SIGINT ou SIGTERM, le serveur refuse les nouvelles connexions, interrompt les commandes WebSocket en cours, révoque les approbations en attente et annule les exécutions. Les envois WebSocket sont limités dans le temps afin qu'un frontend qui ne lit plus ses événements ne puisse pas bloquer l'arrêt. Le backend attend la fin des handlers et des tâches d'exécution, puis des publications de fichiers déjà engagées. Il marque ensuite les éventuels runs encore en attente ou en cours comme `interrupted` dans SQLite, avant de fermer la base. Les écritures déjà validées en transaction sont conservées. Si une connexion ou une publication ne se termine pas dans le délai imparti, le backend signale explicitement l'échec de fermeture au lieu d'ordonner prématurément l'arrêt de la base.
+
+### 11.1. Configuration
+
+Les variables de lancement comprennent :
+
+- `AI_PLATFORM_TOKEN` : jeton secret ;
+- `AI_PLATFORM_ORIGIN` : origine autorisée ;
+- `AI_PLATFORM_PROJECT_ROOT` : répertoire du projet ;
+- `OLLAMA_HOST` : adresse facultative du serveur Ollama ;
+- `AI_PLATFORM_MEMORY_DB` : base SQLite facultative ;
+- `AI_PLATFORM_APPROVE_READS` : approbation facultative des lectures ;
+- `AI_PLATFORM_NUM_CTX` : fenêtre de contexte demandée ;
+- `AI_PLATFORM_NUM_PREDICT` : budget de génération demandé.
+
+### 11.2. Commandes
+
+Le protocole JSON comprend :
+
+- `authenticate` ;
+- `models.list` ;
+- `run.start` ;
+- `run.cancel` ;
+- `approval.resolve` ;
+- `configuration.save`, `configuration.load`, `configuration.list`, `configuration.delete` ;
+- `session.save`, `session.load`, `session.list`, `session.delete` ;
+- `session.bind`, `session.resume`, `session.archive` ;
+- `session.runs`, `session.run.load`, `session.run.events`, `session.run.agents`.
+
+### 11.3. Événements
+
+Les principaux événements sont :
+
+- `authenticated` ;
+- `models.list` ;
+- `run.queued` ;
+- `run.started` ;
+- `agent.started` ;
+- `agent.delta` ;
+- `agent.completed` ;
+- `orchestration.deciding` ;
+- `orchestration.delegated` ;
+- `orchestration.reported` ;
+- `population.round.started` ;
+- `population.round.completed` ;
+- `tool.requested` ;
+- `tool.preview` ;
+- `approval.required` ;
+- `approval.resolved` ;
+- `tool.completed` ;
+- `tool.failed` ;
+- `context.prepared` ;
+- `context.compacted` ;
+- `memory.failed` ;
+- `run.completed` ;
+- `run.failed` ;
+- `run.cancelled` ;
+- `run.interrupted` ;
+- `session.run.started`, `session.run.loaded`, `session.runs` ;
+- `session.saved` ;
+- `session.loaded` ;
+- `session.list` ;
+- `session.deleted` ;
+- `session.failed`, `session.archive`, `session.resumed`, `session.bound` ;
+- `error`.
+
+Les identifiants de corrélation permettent de rattacher les événements aux demandes concernées. Les autorisations des outils sont isolées par connexion WebSocket.
+À la reconnexion, après une nouvelle authentification, `session.resume` restitue la configuration liée, la fenêtre active et la révision actuelle. `session.run.load` retrouve un run précis grâce au `run_id` original ; `session.runs` restitue jusqu'à 50 entrées par page, avec les curseurs facultatifs `before_created_at` et `before_request_id` à fournir ensemble pour consulter les pages suivantes. Chaque entrée contient son état, son prompt, son erreur éventuelle, sa réponse finale lorsqu'elle a été persistée et sa révision. Le client peut ensuite consulter `session.archive` pour reconstituer les messages anciens.
+`session.run.events` expose les événements structurés d'une exécution persistante, par pages de 100. `session.run.agents` restitue les réponses individuelles des agents, par pages de 50, avec leur identifiant, leur couche, leur ordre et leur horodatage. Les deux commandes utilisent le curseur exclusif `after_sequence` et sont isolées par projet.
+
+Les traces sont enregistrées avant leur projection WebSocket. Les deltas token par token restent éphémères. Les événements volumineux sont représentés dans le journal par leurs identifiants, leur longueur et leur empreinte SHA-256. La réponse finale reste enregistrée dans `session_runs`.
+
+Le journal est limité à 4 000 événements et 512 contributions d'agents par exécution. Une erreur de persistance de ces traces empêche de publier une réussite durable.
+
+Cette récupération fournit un **état durable** et non la répétition de tous les deltas déjà envoyés : le rejeu exact des flux WebSocket éphémères n'est pas implémenté. Toute approbation en attente d'une connexion interrompue est révoquée. Une publication déjà autorisée et commencée n'est pas interrompue à mi-écriture : le backend attend son issue avant de fermer le stockage. Une nouvelle approbation est nécessaire pour toute nouvelle proposition d'écriture après reconnexion.
+
+## 12. Frontend
 
 Le frontend graphique reste à développer.
+Il devra permettre de lancer et arrêter le backend, configurer son environnement, s'authentifier, afficher les modèles disponibles et configurer les agents.
+Il devra également prendre en charge les modes mono-agent, MoA, supervisé et populationnel, les conversations persistantes, le streaming des réponses, les événements d'exécution et les demandes d'autorisation.
+Les aperçus d'écriture devront être présentés avant toute décision d'approbation.
+Les déconnexions, les annulations et la fermeture du backend devront être gérées explicitement.
+Le frontend ne doit pas contourner les validations du backend.
 
-Aucun test n'est ajouté par cette étape.
+## 13. MCP
 
-## Outils d'écriture et consolidation
+Les clients MCP ne sont pas encore raccordés au moteur d'agents.
+Leur intégration devra permettre de configurer plusieurs serveurs, découvrir leurs outils, valider leurs schémas et exécuter leurs opérations de manière contrôlée.
+Un serveur MCP ne pourra pas augmenter les permissions de l'agent appelant.
+Les contenus qu'il renvoie resteront des données non fiables.
+Un adaptateur exposant certains services internes à des clients MCP externes pourra être ajouté si nécessaire.
 
-Les outils `project.replace_text` et `project.create_file`
-complètent les trois outils de lecture.
+## 14. Limites techniques
 
-Toute écriture est préparée et présentée au frontend par
-`tool.preview`, avec son diff unifié, son chemin et les
-empreintes SHA-256 anciennes et nouvelles.
+Les fonctionnalités suivantes restent à développer :
 
-Le frontend doit ensuite répondre à `approval.required`
-par `approval.resolve`. Cette autorisation est obligatoire
-pour toutes les écritures, même lorsque les lectures sont
-autorisées automatiquement.
+- le frontend graphique et son lanceur ;
+- les clients et adaptateurs MCP ;
+- la gestion des comptes utilisateurs ;
+- la récupération sémantique ;
+- le comptage exact des tokens selon les modèles ;
+- la découverte des capacités réelles des modèles ;
+- le rejeu complet des événements éphémères après reconnexion ;
+- la reprise d'une exécution après redémarrage ;
+- les historiques d'agents persistants entre exécutions ;
+- les populations évolutionnaires ;
+- la composition hiérarchique des architectures ;
+- la politique de rétention et de sauvegarde ;
+- la gestion avancée de la résidence GPU.
 
-Le consentement concerne la modification déjà préparée :
-les arguments ne peuvent pas être remplacés après l'accord.
+Le comportement réel des différents modèles Ollama et des coupures système reste à valider en conditions réelles ; la compilation seule ne démontre pas les garanties opérationnelles décrites.
 
-`replace_text` exige le SHA-256 du fichier original et
-une occurrence unique du texte à remplacer.
+## 15. Communication et persistance
 
-La version du fichier est recontrôlée immédiatement avant
-l'écriture. `create_file` refuse toute destination existante.
+### 15.1. Structures Rust
 
-Un verrou partagé coordonne les écritures du backend.
-Les fichiers temporaires sont créés dans le répertoire
-de destination, synchronisés puis publiés atomiquement.
+Les configurations d'agents, les modes d'exécution et les populations sont des types métier Rust.
+Les modules internes échangent directement ces structures en mémoire. Aucune sérialisation n'est nécessaire pour ces échanges.
+Serde permet leur sérialisation et leur désérialisation sans imposer un format unique.
+La compatibilité effective avec RON ou un format binaire devra être vérifiée avant leur adoption. La prise en charge de Serde ne garantit pas que toutes les représentations des types métier soient compatibles avec tous les formats.
 
-Les autorisations sont isolées par connexion WebSocket.
+### 15.2. Communication
 
-Les chemins explicitement parcourus refusent les liens
-symboliques et les répertoires sensibles restent interdits.
+Le transport WebSocket actuel utilise JSON. Il transmet directement `ExecutionMode` dans les demandes `run.start`, sans structures `Spec` spécifiques au transport.
+Le fournisseur Ollama utilise également son protocole HTTP JSON.
+Le format du transport peut évoluer indépendamment des structures métier.
 
-Ces vérifications applicatives n'éliminent pas toutes
-les courses avec des processus externes capables de
-modifier simultanément l'arborescence du projet.
+### 15.3. SQLite
 
-Les définitions d'outils sont prises en compte dans
-l'estimation prudente du budget de contexte, y compris
-après les résultats des outils.
+La mémoire conversationnelle et les sessions utilisent une infrastructure SQLite commune.
+`rusqlite` est compilé avec la fonctionnalité `bundled`.
+Le déploiement du backend n'exige donc pas l'installation séparée de SQLite.
+La base reste facultative. Elle est ouverte lorsque `AI_PLATFORM_MEMORY_DB` est configurée.
+Les sessions utilisent cette même base.
+La mémoire et les sessions sont actuellement cloisonnées par projet. Aucune gestion de comptes utilisateurs n'est implémentée.
+Les messages des sessions sont enregistrés sous forme de JSON dans une colonne SQLite. La mémoire possède ses propres colonnes métier. À ce stade du projet, une base neuve reçoit directement le schéma unique actuel : il n'existe ni schémas intermédiaires ni migration de données héritées. L'utilisation simultanée du même fichier par plusieurs processus backend n'est pas prise en charge.
 
-Un dépassement du budget interrompt l'exécution.
-La récupération sélective, le comptage exact des tokens
-et la mémoire SQLite restent à implémenter.
+### 15.4. Configurations persistantes
 
-Aucun outil de suppression, aucune exécution de commandes
-et aucune intégration MCP ne sont introduits ici.
+Les configurations `ExecutionMode` peuvent être enregistrées dans la même base SQLite que les sessions et la mémoire, lorsque celle-ci est activée.
+`ConfigurationStore` permet de créer, modifier, charger, lister et supprimer les configurations.
+Chaque configuration est identifiée par projet, avec une révision empêchant les écrasements concurrents silencieux.
+Les configurations sont validées avant leur enregistrement et à leur chargement.
+Le contenu des configurations est actuellement encodé en JSON dans SQLite. Ce choix de stockage reste indépendant des structures métier Rust et du protocole WebSocket.
+Les commandes disponibles sont `configuration.save`, `configuration.load`, `configuration.list` et `configuration.delete`.
+L'import et l'export RON, la gestion de comptes utilisateurs et la reprise des exécutions après redémarrage ne sont pas encore implémentés.
 
-Aucun test n'a été créé.
+### 15.5. Frontières du runtime
 
+Les configurations persistantes ne doivent pas être confondues avec les données temporaires d'une exécution : historiques individuels, rapports, contributions et décisions.
+Un éventuel mécanisme de reprise devra préciser quelles données temporaires conserver, comment les versionner et quand les supprimer.
 
-## Accès aux fichiers fondés sur les capacités
+## Sessions liées et reprise des conversations
 
-Les outils natifs de lecture et d'écriture utilisent `FileManager` pour
-résoudre les chemins relativement au répertoire du projet avec `cap-std`.
-Le code du backend n'effectue pas d'appels directs à `libc` et n'ajoute
-aucun bloc `unsafe` pour ces opérations.
+Une session peut être associée à une configuration persistante avec `session.bind`.
+L'association conserve une copie de la configuration et de sa révision. Une modification ultérieure de la configuration d'origine ne modifie pas silencieusement une conversation existante.
+`session.resume` restitue l'historique, la configuration associée et la révision de session.
 
-La lecture `project.read_file` utilise `AnchoredPath` et ses instantanés
-de fichiers : contrôle de la taille, refus des liens symboliques constatés,
-refus des fichiers à plusieurs liens matériels et vérification de l'identité
-et du contenu durant la lecture.
+`run.start` accepte exactement une source :
 
-`project.list_files` et `project.search_text` parcourent des répertoires
-ouverts par `FileManager` ; elles ne reconstruisent plus de chemins
-absolus pour ouvrir les éléments découverts. Les noms protégés restent
-filtrés avant toute traversée. Les parcours sont bornés et la lecture et
-la recherche s'exécutent dans une tâche bloquante, hors des threads
-asynchrones de Tokio. La racine du projet s'indique par `.` lors de
-l'appel à `project.list_files`.
+- une configuration complète ;
+- une configuration enregistrée identifiée par son ID ;
+- une session liée à une configuration.
 
-Les écritures conservent la préparation d'un aperçu et son empreinte
-SHA-256, l'approbation explicite liée à cet aperçu, les contrôles de
-conflits avant publication et le verrou global du backend. La création
-refuse de remplacer une destination déjà existante ; le remplacement
-publie un fichier temporaire synchronisé puis synchronise le répertoire.
-
-Les contrôles applicatifs et `cap-std` n'isolent pas le processus des
-autres ressources auxquelles le compte système a accès. Ils ne rendent
-pas non plus atomique la séquence « dernière vérification puis renommage »
-face à un processus extérieur qui modifie simultanément la destination.
-Aucune garantie absolue contre les courses externes n'est revendiquée.
-
-Les limites de contexte et la récupération ciblée du code restent une
-étape distincte. Aucun test supplémentaire n'est ajouté par ce commit.
-
-## Sélection ciblée du contexte conversationnel
-
-L'assemblage du contexte est centralisé pour les agents mono-IA et MoA.
-Le dernier message utilisateur, les instructions du rôle et les
-propositions de la couche MoA précédente sont obligatoires ; si ces
-éléments ne tiennent pas dans le budget, la génération est refusée sans
-tronquer silencieusement ces données.
-
-Les échanges plus anciens sont regroupés par tours commençant par un
-message utilisateur. Le gestionnaire compare les termes significatifs
-de la question actuelle aux termes présents dans chaque échange,
-classe les groupes par pertinence lexicale pondérée (question actuelle
-prioritaire, instructions du rôle en complément) puis par récence, et insère
-les groupes retenus dans leur ordre chronologique d'origine. Un
-échange incomplet n'est pas ajouté uniquement pour remplir le budget.
-Cette première méthode est déterministe : elle ne prétend ni mesurer
-la pertinence sémantique ni identifier toutes les dépendances du code.
-
-Chaque préparation de contexte expose dans l'événement WebSocket
-`context.prepared` les indices des messages historiques retenus et
-les identifiants des agents dont les propositions non vérifiées ont été
-transmises. Ces indices se rapportent à l'historique soumis au backend ;
-ils ne constituent pas une mémoire durable. La présence de plusieurs
-extraits historiques n'implique pas qu'ils soient consécutifs.
-
-Les outils natifs existants restent le moyen autorisé d'obtenir du code
-à jour : le gestionnaire ne lit pas automatiquement le projet et ne
-contourne pas les demandes d'approbation des lectures. Les résultats
-de recherche et de lecture portent des chemins, lignes ou empreintes
-selon l'outil concerné ; les propositions MoA ne sont jamais marquées
-comme vérifiées.
-
-L'estimation du budget demeure fondée sur les octets UTF-8 ; les
-capacités réelles des modèles et le nombre exact de tokens ne sont
-pas encore interrogés. Lorsque de nouveaux résultats d'outils saturent
-le contexte pendant un tour, l'exécution s'interrompt toujours :
-la compression incrémentale et la récupération sémantique ne sont
-pas implémentées par ce changement. La mémoire SQLite et MCP ne sont
-pas concernés. Aucun test n'est ajouté.
-
-## Budget de contexte après les résultats des outils
-
-Chaque génération d'un agent commence avec le contexte sélectionné
-par `assemble`. Les tours avec outils sont désormais conservés dans
-`ToolContext` comme des échanges complets : message d'appel de
-l'assistant et résultats correspondants. Les échanges non compactés
-préservent le protocole des appels d'outils d'Ollama.
-
-Avant chaque nouvelle génération, le gestionnaire compare la taille
-JSON effective de ces messages et les réserves pour les définitions
-d'outils et la sortie à la fenêtre configurée. Si le budget est dépassé,
-il condense d'abord les anciens tours de lecture terminés, puis retire
-les échanges de conversation historiques facultatifs les plus anciens.
-Si cela ne suffit toujours pas, il peut condenser la dernière lecture.
-Les tours contenant des appels d'écriture ne sont jamais compactés ;
-les instructions, le dernier message de l'utilisateur et les apports
-MoA obligatoires sont toujours conservés.
-
-Un registre compact remplace un tour de lecture écarté. Il contient
-le nom des outils et, lorsqu'elles existent, des métadonnées bornées :
-chemin, empreinte SHA-256, plages ou nombres de lignes, nombre de
-résultats et échantillons de chemins. Ce registre n'est pas présenté
-comme du code complet ni comme une preuve de fraîcheur : l'agent doit
-relire les informations absentes et vérifier leur empreinte avant de
-proposer une modification.
-
-L'événement WebSocket `context.compacted` signale les indices des tours
-condensés, les indices des messages historiques omis et les cas dans
-lesquels même la lecture la plus récente a été compactée. Aucune
-compression fondée sur un modèle, aucun nouvel outil, aucune lecture
-automatique, aucune mémoire SQLite et aucun changement aux accords
-d'écriture ne sont ajoutés.
-
-Le registre lui-même consomme du contexte : si les seules données
-obligatoires ou les échanges d'écriture excèdent la fenêtre, la
-génération s'interrompt explicitement au lieu de supprimer des données
-sensibles. Le budget reste une estimation en octets UTF-8 et non un
-comptage exact des tokens. Aucun test n'est ajouté à cette étape.
+Dans le cas d'une session liée, le frontend transmet un seul nouveau message utilisateur et la révision attendue de la session.
+Le backend recharge l'historique, journalise la demande avant l'attente GPU, exécute les agents et enregistre automatiquement la réponse finale et l'état terminal après une génération réussie.
+`session.runs` permet de consulter les exécutions en attente, en cours, terminées, échouées, annulées ou interrompues. `session.run.load` récupère précisément une exécution par son identifiant original.
+Une génération interrompue n'est pas relancée automatiquement après redémarrage.
+Les anciennes sessions restent lisibles et peuvent être associées à une configuration persistante.
+La fenêtre active conserve au maximum 32 messages.
+Avant chaque nouvelle exécution d'une session liée, le backend archive les messages les plus anciens jusqu'à conserver au maximum 30 messages précédents et à réserver suffisamment d'espace pour la nouvelle demande et une réponse de 32 Kio. La fenêtre active reste limitée à 128 Kio et 32 messages, sans supprimer les messages archivés.
+Cette opération est atomique avec l'enregistrement du prompt et du run dans SQLite.
+La conversation complète reste récupérable via `session.archive`, par pages d'au plus 50 messages, dans l'ordre antéchronologique.
+Le curseur exclusif `before_sequence` permet de charger les pages précédentes.
+Le schéma courant est créé directement avec les archives de messages, le journal des exécutions et leurs résultats finaux. Une contrainte d'unicité partielle empêche deux exécutions `queued` ou `running` sur la même session. Aucune migration historique n'est implémentée tant qu'aucune base réelle antérieure n'est à préserver.
+Une exécution échouée, annulée ou interrompue après sa réservation conserve le prompt et sa révision. Les réservations encore actives après une fermeture coordonnée sont marquées `interrupted` avant l'arrêt de SQLite. En cas de coupure brutale, elles sont réconciliées en `interrupted` à la réouverture du backend, sans reprise automatique de génération. Les transactions SQLite en mode WAL avec synchronisation FULL évitent de publier un succès avant la validation durable de la réponse, mais ne remplacent pas une stratégie de sauvegarde externe. L'ouverture d'une même base simultanément par plusieurs processus backend n'est pas prise en charge par la récupération au démarrage, qui interprète les runs actifs du projet comme ceux d'un processus précédent.
+Une exécution sans session demeure temporaire.
+Le WebSocket existant reste l'unique interface applicative du backend. Aucun CLI supplémentaire n'est introduit.
