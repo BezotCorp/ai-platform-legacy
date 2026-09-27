@@ -225,9 +225,30 @@ impl SessionStore {
                 if running != 0 {
                     bail!("Session déjà en cours d'exécution");
                 }
-                // Déplacer les messages anciens avant le nouveau tour, sans les perdre.
-                let overflow = messages.len().saturating_sub(30);
-                if overflow > 0 {
+                // Réserver une place pour le prompt et une réponse de taille maximale.
+                // Le nombre de messages et le budget en octets doivent tenir ensemble.
+                let mut active_bytes = messages.iter().try_fold(0usize, |total, message| {
+                    total
+                        .checked_add(message.content.len())
+                        .context("Conversation trop volumineuse")
+                })?;
+                let reserved_bytes = prompt
+                    .content
+                    .len()
+                    .checked_add(History::MAX_MESSAGE_BYTES)
+                    .context("Conversation trop volumineuse")?;
+                let max_previous_messages = History::MAX_MESSAGES - 2;
+                let mut archived = Vec::new();
+                while messages.len() > max_previous_messages
+                    || active_bytes
+                        .checked_add(reserved_bytes)
+                        .is_none_or(|total| total > History::MAX_HISTORY_BYTES)
+                {
+                    let oldest = messages.remove(0);
+                    active_bytes -= oldest.content.len();
+                    archived.push(oldest);
+                }
+                if !archived.is_empty() {
                     let mut next_sequence: i64 = connection.query_row(
                         "SELECT COALESCE(MAX(sequence), 0)
                          FROM session_message_archive
@@ -235,7 +256,7 @@ impl SessionStore {
                         params![project, session_id],
                         |row| row.get(0),
                     )?;
-                    for old in messages.drain(..overflow) {
+                    for old in archived {
                         next_sequence = next_sequence
                             .checked_add(1)
                             .context("Archive de session saturée")?;

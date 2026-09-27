@@ -431,7 +431,7 @@ Le backend recharge l'historique, ajoute la demande, exécute les agents et enre
 Une génération interrompue n'est pas relancée automatiquement après redémarrage.
 Les anciennes sessions restent lisibles et peuvent être associées à une configuration persistante.
 La fenêtre active conserve au maximum 32 messages.
-Avant chaque nouvelle exécution d'une session liée, le backend archive les messages les plus anciens pour conserver au maximum 30 messages précédents, puis ajoute la demande et la réponse.
+Avant chaque nouvelle exécution d'une session liée, le backend archive les messages les plus anciens jusqu'à conserver au maximum 30 messages précédents et à réserver suffisamment d'espace pour la nouvelle demande et une réponse de 32 Kio. La fenêtre active reste limitée à 128 Kio et 32 messages, sans supprimer les messages archivés.
 Cette opération est atomique avec l'enregistrement du prompt et du run dans SQLite.
 La conversation complète reste récupérable via `session.archive`, par pages d'au plus 50 messages, dans l'ordre antéchronologique.
 Le curseur exclusif `before_sequence` permet de charger les pages précédentes.
