@@ -4,7 +4,9 @@ use rusqlite::{OptionalExtension, params};
 use crate::{
     agents::ExecutionMode,
     configurations::SavedConfiguration,
-    sessions::{ArchivedMessage, BoundSession, History, Message, Session, SessionRun, SessionStore},
+    sessions::{
+        ArchivedMessage, BoundSession, History, Message, Session, SessionRun, SessionStore,
+    },
 };
 
 impl SessionStore {
@@ -234,7 +236,8 @@ impl SessionStore {
                         |row| row.get(0),
                     )?;
                     for old in messages.drain(..overflow) {
-                        next_sequence = next_sequence.checked_add(1)
+                        next_sequence = next_sequence
+                            .checked_add(1)
                             .context("Archive de session saturée")?;
                         connection.execute(
                             "INSERT INTO session_message_archive
@@ -421,9 +424,8 @@ impl SessionStore {
                        AND (?3 IS NULL OR sequence < ?3)
                      ORDER BY sequence DESC LIMIT 50",
                 )?;
-                let messages = statement.query_map(
-                    params![project, session_id, before_sequence],
-                    |row| {
+                let messages =
+                    statement.query_map(params![project, session_id, before_sequence], |row| {
                         Ok(ArchivedMessage {
                             sequence: row.get(0)?,
                             message: Message {
@@ -432,8 +434,7 @@ impl SessionStore {
                             },
                             archived_at: row.get(3)?,
                         })
-                    },
-                )?;
+                    })?;
                 Ok(messages.collect::<rusqlite::Result<Vec<_>>>()?)
             })
             .await

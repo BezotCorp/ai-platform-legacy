@@ -78,94 +78,55 @@ L'infrastructure SQLite est indépendante des schémas métier. Les opérations 
 
 ### 4.1. Configuration canonique
 
-`AgentConfig` décrit l'identité, le rôle, les instructions,
-le fournisseur et le modèle d'un agent.
-
+`AgentConfig` décrit l'identité, le rôle, les instructions, le fournisseur et le modèle d'un agent.
 `ExecutionMode` constitue l'entrée commune du moteur.
 Il distingue un agent unique d'une architecture multi-agents.
-
-Les configurations métier prennent en charge Serde.
-Elles ne dépendent pas du protocole WebSocket.
+Les configurations métier prennent en charge Serde. Elles ne dépendent pas du protocole WebSocket.
 
 ### 4.2. Stratégies multi-agents
 
 `MultiAgentStrategy` comporte actuellement trois stratégies :
 
-- `LayeredMoa` : plusieurs couches d'agents, suivies
-  d'un agrégateur final ;
-- `Supervised` : un superviseur choisit les travailleurs,
-  leur délègue des tâches et décide quand conclure ;
-- `Population` : plusieurs agents collaborent pendant
-  plusieurs tours, puis un facilitateur produit la synthèse.
+- `LayeredMoa` : plusieurs couches d'agents, suivies d'un agrégateur final ;
+- `Supervised` : un superviseur choisit les travailleurs, leur délègue des tâches et décide quand conclure ;
+- `Population` : plusieurs agents collaborent pendant plusieurs tours, puis un facilitateur produit la synthèse.
 
-Les identifiants des participants sont validés pour
-éviter les doublons dans une même architecture.
+Les identifiants des participants sont validés pour éviter les doublons dans une même architecture.
 
 ### 4.3. Population collaborative
 
-Une population possède entre deux et quatre agents,
-un facilitateur distinct et entre un et quatre tours.
+Une population possède entre deux et quatre agents, un facilitateur distinct et entre un et quatre tours.
 
 Sa politique de participation lui appartient :
 
 - `Fixed` : tous les agents participent à chaque tour ;
-- `Adaptive` : le facilitateur sélectionne les agents
-  de chaque tour entre `min_agents` et `max_agents`.
+- `Adaptive` : le facilitateur sélectionne les agents de chaque tour entre `min_agents` et `max_agents`.
 
-Chaque agent conserve son propre historique pendant
-l'exécution. Les contributions du tour précédent
-sont transmises aux participants du tour suivant
-comme informations non vérifiées.
-
-Les contributions échangées sont limitées à
-240 caractères par agent. Le facilitateur reçoit
-les contributions du dernier tour pour sa synthèse.
-
-Les historiques individuels ne sont pas encore
-persistés entre plusieurs exécutions.
-
-La sélection adaptative utilise les rôles disponibles
-et des rapports récents limités en taille.
-Elle ne constitue pas un mécanisme évolutionnaire.
+Chaque agent conserve son propre historique pendant l'exécution.
+Les contributions du tour précédent sont transmises aux participants du tour suivant comme informations non vérifiées.
+Les contributions échangées sont limitées à 240 caractères par agent. Le facilitateur reçoit les contributions du dernier tour pour sa synthèse.
+Les historiques individuels ne sont pas encore persistés entre plusieurs exécutions.
+La sélection adaptative utilise les rôles disponibles et des rapports récents limités en taille. Elle ne constitue pas un mécanisme évolutionnaire.
 
 ### 4.4. Supervision autonome
 
-Le superviseur peut déléguer successivement plusieurs
-tâches aux travailleurs configurés, examiner leurs
-rapports et produire une réponse finale.
-
-Chaque travailleur conserve son historique pendant
-l'exécution. Les délégations et les décisions
-restent limitées par la configuration.
-
-Il n'existe pas encore de délégation hiérarchique
-permettant à un superviseur de lancer une population
-ou un autre superviseur comme sous-architecture.
+Le superviseur peut déléguer successivement plusieurs tâches aux travailleurs configurés, examiner leurs rapports et produire une réponse finale.
+Chaque travailleur conserve son historique pendant l'exécution.
+Les délégations et les décisions restent limitées par la configuration.
+Il n'existe pas encore de délégation hiérarchique permettant à un superviseur de lancer une population ou un autre superviseur comme sous-architecture.
 
 ### 4.5. Exécution et ressources
 
-Les générations sont séquentielles. Un sémaphore
-global limite à une le nombre d'exécutions utilisant
-le GPU simultanément dans un processus backend.
-
+Les générations sont séquentielles. Un sémaphore global limite à une le nombre d'exécutions utilisant le GPU simultanément dans un processus backend.
 `AgentExecution` choisit le moteur adapté au mode.
-`AgentTurn` réalise la génération et les cycles
-d'utilisation des outils.
-
-Le contexte, les outils, les approbations,
-l'annulation et la mémoire sont mutualisés.
-
-Les contributions des autres agents et les souvenirs
-restent des données non fiables. Ils ne remplacent
-jamais une vérification des fichiers réels.
+`AgentTurn` réalise la génération et les cycles d'utilisation des outils.
+Le contexte, les outils, les approbations, l'annulation et la mémoire sont mutualisés.
+Les contributions des autres agents et les souvenirs restent des données non fiables.
+Ils ne remplacent jamais une vérification des fichiers réels.
 
 ### 4.6. Capacités non implémentées
 
-Les populations évolutionnaires, les mutations,
-la sélection intergénérationnelle, les échanges
-directs entre agents hors des tours collaboratifs
-et la persistance des historiques individuels
-restent à développer.
+Les populations évolutionnaires, les mutations, la sélection intergénérationnelle, les échanges directs entre agents hors des tours collaboratifs et la persistance des historiques individuels restent à développer.
 
 ## 5. Fournisseurs de modèles
 
@@ -410,111 +371,53 @@ Les fonctionnalités suivantes restent à développer :
 - la politique de rétention et de sauvegarde ;
 - la gestion avancée de la résidence GPU.
 
-Les stratégies actuelles compilent, mais leur comportement
-avec les différents modèles Ollama reste à valider
-en conditions réelles.
+Les stratégies actuelles compilent, mais leur comportement avec les différents modèles Ollama reste à valider en conditions réelles.
 
 ## 15. Communication et persistance
 
 ### 15.1. Structures Rust
 
-Les configurations d'agents, les modes d'exécution
-et les populations sont des types métier Rust.
-
-Les modules internes échangent directement
-ces structures en mémoire. Aucune sérialisation
-n'est nécessaire pour ces échanges.
-
-Serde permet leur sérialisation et leur
-désérialisation sans imposer un format unique.
-
+Les configurations d'agents, les modes d'exécution et les populations sont des types métier Rust.
+Les modules internes échangent directement ces structures en mémoire. Aucune sérialisation n'est nécessaire pour ces échanges.
+Serde permet leur sérialisation et leur désérialisation sans imposer un format unique.
 La compatibilité effective avec RON ou un format binaire devra être vérifiée avant leur adoption. La prise en charge de Serde ne garantit pas que toutes les représentations des types métier soient compatibles avec tous les formats.
 
 ### 15.2. Communication
 
-Le transport WebSocket actuel utilise JSON.
-Il transmet directement `ExecutionMode` dans
-les demandes `run.start`, sans structures `Spec`
-spécifiques au transport.
-
-Le fournisseur Ollama utilise également
-son protocole HTTP JSON.
-
-Le format du transport peut évoluer
-indépendamment des structures métier.
+Le transport WebSocket actuel utilise JSON. Il transmet directement `ExecutionMode` dans les demandes `run.start`, sans structures `Spec` spécifiques au transport.
+Le fournisseur Ollama utilise également son protocole HTTP JSON.
+Le format du transport peut évoluer indépendamment des structures métier.
 
 ### 15.3. SQLite
 
-La mémoire conversationnelle et les sessions
-utilisent une infrastructure SQLite commune.
-
-`rusqlite` est compilé avec la fonctionnalité
-`bundled`. Le déploiement du backend n'exige
-donc pas l'installation séparée de SQLite.
-
-La base reste facultative. Elle est ouverte
-lorsque `AI_PLATFORM_MEMORY_DB` est configurée.
+La mémoire conversationnelle et les sessions utilisent une infrastructure SQLite commune.
+`rusqlite` est compilé avec la fonctionnalité `bundled`.
+Le déploiement du backend n'exige donc pas l'installation séparée de SQLite.
+La base reste facultative. Elle est ouverte lorsque `AI_PLATFORM_MEMORY_DB` est configurée.
 Les sessions utilisent cette même base.
-
-La mémoire et les sessions sont actuellement
-cloisonnées par projet. Aucune gestion de
-comptes utilisateurs n'est implémentée.
-
-Les messages des sessions sont enregistrés
-sous forme de JSON dans une colonne SQLite.
-La mémoire possède ses propres colonnes métier.
+La mémoire et les sessions sont actuellement cloisonnées par projet. Aucune gestion de comptes utilisateurs n'est implémentée.
+Les messages des sessions sont enregistrés sous forme de JSON dans une colonne SQLite. La mémoire possède ses propres colonnes métier.
 
 ### 15.4. Configurations persistantes
 
-Les configurations `ExecutionMode` peuvent être
-enregistrées dans la même base SQLite que les
-sessions et la mémoire, lorsque celle-ci est activée.
-
-`ConfigurationStore` permet de créer, modifier,
-charger, lister et supprimer les configurations.
-Chaque configuration est identifiée par projet,
-avec une révision empêchant les écrasements
-concurrents silencieux.
-
-Les configurations sont validées avant leur
-enregistrement et à leur chargement.
-
-Le contenu des configurations est actuellement
-encodé en JSON dans SQLite. Ce choix de stockage
-reste indépendant des structures métier Rust
-et du protocole WebSocket.
-
-Les commandes disponibles sont `configuration.save`,
-`configuration.load`, `configuration.list` et
-`configuration.delete`.
-
-L'import et l'export RON, la gestion de comptes
-utilisateurs et la reprise des exécutions après
-redémarrage ne sont pas encore implémentés.
+Les configurations `ExecutionMode` peuvent être enregistrées dans la même base SQLite que les sessions et la mémoire, lorsque celle-ci est activée.
+`ConfigurationStore` permet de créer, modifier, charger, lister et supprimer les configurations.
+Chaque configuration est identifiée par projet, avec une révision empêchant les écrasements concurrents silencieux.
+Les configurations sont validées avant leur enregistrement et à leur chargement.
+Le contenu des configurations est actuellement encodé en JSON dans SQLite. Ce choix de stockage reste indépendant des structures métier Rust et du protocole WebSocket.
+Les commandes disponibles sont `configuration.save`, `configuration.load`, `configuration.list` et `configuration.delete`.
+L'import et l'export RON, la gestion de comptes utilisateurs et la reprise des exécutions après redémarrage ne sont pas encore implémentés.
 
 ### 15.5. Frontières du runtime
 
-Les configurations persistantes ne doivent
-pas être confondues avec les données temporaires
-d'une exécution : historiques individuels,
-rapports, contributions et décisions.
-
-Un éventuel mécanisme de reprise devra
-préciser quelles données temporaires conserver,
-comment les versionner et quand les supprimer.
+Les configurations persistantes ne doivent pas être confondues avec les données temporaires d'une exécution : historiques individuels, rapports, contributions et décisions.
+Un éventuel mécanisme de reprise devra préciser quelles données temporaires conserver, comment les versionner et quand les supprimer.
 
 ## Sessions liées et reprise des conversations
 
-Une session peut être associée à une configuration
-persistante avec `session.bind`.
-
-L'association conserve une copie de la configuration
-et de sa révision. Une modification ultérieure de
-la configuration d'origine ne modifie pas
-silencieusement une conversation existante.
-
-`session.resume` restitue l'historique,
-la configuration associée et la révision de session.
+Une session peut être associée à une configuration persistante avec `session.bind`.
+L'association conserve une copie de la configuration et de sa révision. Une modification ultérieure de la configuration d'origine ne modifie pas silencieusement une conversation existante.
+`session.resume` restitue l'historique, la configuration associée et la révision de session.
 
 `run.start` accepte exactement une source :
 
@@ -522,41 +425,18 @@ la configuration associée et la révision de session.
 - une configuration enregistrée identifiée par son ID ;
 - une session liée à une configuration.
 
-Dans le cas d'une session liée, le frontend transmet
-un seul nouveau message utilisateur et la révision
-attendue de la session.
-
-Le backend recharge l'historique, ajoute la demande,
-exécute les agents et enregistre automatiquement
-la réponse finale après une génération réussie.
-
-`session.runs` permet de consulter les exécutions
-terminées, échouées, annulées ou interrompues.
-
-Une génération interrompue n'est pas relancée
-automatiquement après redémarrage.
-
-Les anciennes sessions restent lisibles et peuvent
-être associées à une configuration persistante.
-
-La fenêtre active conserve au maximum 32 messages. Avant chaque
-nouvelle exécution d'une session liée, le backend archive les messages
-les plus anciens pour conserver au maximum 30 messages précédents,
-puis ajoute la demande et la réponse. Cette opération est atomique
-avec l'enregistrement du prompt et du run dans SQLite. La conversation
-complète reste récupérable via `session.archive`, par pages d'au plus
-50 messages, dans l'ordre antéchronologique. Le curseur exclusif
-`before_sequence` permet de charger les pages précédentes.
-
-Le schéma sessions v3 introduit `session_message_archive`. Les bases
-v1 et v2 sont migrées sans suppression des sessions existantes.
-Une exécution échouée ou annulée après `session.run.started` conserve
-le prompt enregistré et le statut du run. Une interruption brutale
-est marquée `interrupted` à la réouverture du backend, sans reprise
-automatique de génération.
-
+Dans le cas d'une session liée, le frontend transmet un seul nouveau message utilisateur et la révision attendue de la session.
+Le backend recharge l'historique, ajoute la demande, exécute les agents et enregistre automatiquement la réponse finale après une génération réussie.
+`session.runs` permet de consulter les exécutions terminées, échouées, annulées ou interrompues.
+Une génération interrompue n'est pas relancée automatiquement après redémarrage.
+Les anciennes sessions restent lisibles et peuvent être associées à une configuration persistante.
+La fenêtre active conserve au maximum 32 messages.
+Avant chaque nouvelle exécution d'une session liée, le backend archive les messages les plus anciens pour conserver au maximum 30 messages précédents, puis ajoute la demande et la réponse.
+Cette opération est atomique avec l'enregistrement du prompt et du run dans SQLite.
+La conversation complète reste récupérable via `session.archive`, par pages d'au plus 50 messages, dans l'ordre antéchronologique.
+Le curseur exclusif `before_sequence` permet de charger les pages précédentes.
+Le schéma sessions v3 introduit `session_message_archive`. Les bases v1 et v2 sont migrées sans suppression des sessions existantes.
+Une exécution échouée ou annulée après `session.run.started` conserve le prompt enregistré et le statut du run.
+Une interruption brutale est marquée `interrupted` à la réouverture du backend, sans reprise automatique de génération.
 Une exécution sans session demeure temporaire.
-
-Le WebSocket existant reste l'unique interface
-applicative du backend. Aucun CLI supplémentaire
-n'est introduit.
+Le WebSocket existant reste l'unique interface applicative du backend. Aucun CLI supplémentaire n'est introduit.
