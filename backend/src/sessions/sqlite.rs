@@ -1,106 +1,52 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use rusqlite::Connection;
 
+/// Schéma de lancement : aucune migration historique n'est nécessaire.
 pub(crate) fn apply(connection: &Connection) -> Result<()> {
     connection.execute_batch(
-        "CREATE TABLE IF NOT EXISTS session_schema_version (
-            version INTEGER PRIMARY KEY
-        );",
-    )?;
+        "CREATE TABLE IF NOT EXISTS sessions (
+            project TEXT NOT NULL,
+            id TEXT NOT NULL,
+            revision INTEGER NOT NULL DEFAULT 1,
+            messages TEXT NOT NULL,
+            configuration_id TEXT,
+            configuration_revision INTEGER,
+            configuration_mode TEXT,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            PRIMARY KEY(project, id)
+        );
 
-    let version: Option<i64> = connection.query_row(
-        "SELECT MAX(version) FROM session_schema_version",
-        [],
-        |row| row.get(0),
-    )?;
+        CREATE INDEX IF NOT EXISTS sessions_project_updated
+            ON sessions(project, updated_at DESC);
 
-    match version {
-        None => {
-            connection.execute_batch(
-                "CREATE TABLE sessions (
-                    project TEXT NOT NULL,
-                    id TEXT NOT NULL,
-                    revision INTEGER NOT NULL DEFAULT 1,
-                    messages TEXT NOT NULL,
-                    created_at INTEGER NOT NULL
-                        DEFAULT (unixepoch()),
-                    updated_at INTEGER NOT NULL
-                        DEFAULT (unixepoch()),
-                    PRIMARY KEY(project, id)
-                );
-
-                CREATE INDEX sessions_project_updated
-                    ON sessions(project, updated_at DESC);
-
-                INSERT INTO session_schema_version(version)
-                    VALUES (1);",
-            )?;
-
-            migrate_to_v2(connection)?;
-            migrate_to_v3(connection)?;
-            migrate_to_v4(connection)?;
-        }
-        Some(1) => {
-            migrate_to_v2(connection)?;
-            migrate_to_v3(connection)?;
-            migrate_to_v4(connection)?;
-        }
-        Some(2) => {
-            migrate_to_v3(connection)?;
-            migrate_to_v4(connection)?;
-        }
-        Some(3) => migrate_to_v4(connection)?,
-        Some(4) => {}
-        Some(version) => {
-            bail!("Version du schéma sessions non prise en charge : {version}");
-        }
-    }
-
-    Ok(())
-}
-
-fn migrate_to_v2(connection: &Connection) -> Result<()> {
-    connection.execute_batch(
-        "ALTER TABLE sessions
-            ADD COLUMN configuration_id TEXT;
-
-         ALTER TABLE sessions
-            ADD COLUMN configuration_revision INTEGER;
-
-         ALTER TABLE sessions
-            ADD COLUMN configuration_mode TEXT;
-
-         CREATE TABLE session_runs (
+        CREATE TABLE IF NOT EXISTS session_runs (
             project TEXT NOT NULL,
             session_id TEXT NOT NULL,
             request_id TEXT NOT NULL,
-            status TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN (
+                'queued', 'running', 'completed', 'failed',
+                'cancelled', 'interrupted'
+            )),
             prompt TEXT NOT NULL,
             error TEXT,
-            created_at INTEGER NOT NULL
-                DEFAULT (unixepoch()),
-            updated_at INTEGER NOT NULL
-                DEFAULT (unixepoch()),
-            PRIMARY KEY(project, session_id, request_id)
-         );
+            result TEXT,
+            session_revision INTEGER,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+            PRIMARY KEY(project, session_id, request_id),
+            FOREIGN KEY(project, session_id)
+                REFERENCES sessions(project, id) ON DELETE CASCADE
+        );
 
-         CREATE INDEX session_runs_by_session
-            ON session_runs(
-                project,
-                session_id,
-                created_at DESC
-            );
+        CREATE INDEX IF NOT EXISTS session_runs_by_session
+            ON session_runs(project, session_id, created_at DESC);
 
-         UPDATE session_schema_version
-            SET version = 2
-            WHERE version = 1;",
-    )?;
-    Ok(())
-}
+        CREATE UNIQUE INDEX IF NOT EXISTS session_runs_one_active
+            ON session_runs(project, session_id)
+            WHERE status IN ('queued', 'running');
 
-fn migrate_to_v3(connection: &Connection) -> Result<()> {
-    connection.execute_batch(
-        "CREATE TABLE session_message_archive (
+        CREATE TABLE IF NOT EXISTS session_message_archive (
             project TEXT NOT NULL,
             session_id TEXT NOT NULL,
             sequence INTEGER NOT NULL,
@@ -110,19 +56,7 @@ fn migrate_to_v3(connection: &Connection) -> Result<()> {
             PRIMARY KEY(project, session_id, sequence),
             FOREIGN KEY(project, session_id)
                 REFERENCES sessions(project, id) ON DELETE CASCADE
-         );
-         UPDATE session_schema_version SET version = 3 WHERE version = 2;",
-    )?;
-    Ok(())
-}
-
-fn migrate_to_v4(connection: &Connection) -> Result<()> {
-    connection.execute_batch(
-        "ALTER TABLE session_runs ADD COLUMN result TEXT;
-         ALTER TABLE session_runs ADD COLUMN session_revision INTEGER;
-         CREATE INDEX session_runs_active
-             ON session_runs(project, session_id, status);
-         UPDATE session_schema_version SET version = 4 WHERE version = 3;",
+        );",
     )?;
     Ok(())
 }

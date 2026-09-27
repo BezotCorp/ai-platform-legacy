@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use rusqlite::{OptionalExtension, params};
 
 use crate::{
-    sessions::{History, Message, Session, apply},
+    sessions::{History, Message, Session},
     sqlite::Database,
 };
 
@@ -14,7 +14,6 @@ pub(crate) struct SessionStore {
 
 impl SessionStore {
     pub(crate) async fn open(database: Database, project: String) -> Result<Self> {
-        database.write(apply).await?;
         let scope = project.clone();
         database
             .write(move |connection| {

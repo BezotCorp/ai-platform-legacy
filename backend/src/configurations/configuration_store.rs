@@ -3,7 +3,7 @@ use rusqlite::{OptionalExtension, params};
 
 use crate::{
     agents::ExecutionMode,
-    configurations::{ConfigurationSummary, SavedConfiguration, apply},
+    configurations::{ConfigurationSummary, SavedConfiguration},
     sqlite::Database,
 };
 
@@ -15,8 +15,6 @@ pub(crate) struct ConfigurationStore {
 
 impl ConfigurationStore {
     pub(crate) async fn open(database: Database, project: String) -> Result<Self> {
-        database.write(apply).await?;
-
         Ok(Self { database, project })
     }
 

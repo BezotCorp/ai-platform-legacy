@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use rusqlite::Connection;
+use rusqlite::{Connection, TransactionBehavior};
 
 use crate::sqlite::{connection, database_inner::DatabaseInner, readers::Readers, writer::Writer};
 
@@ -24,7 +24,7 @@ impl Database {
     /// l'infrastructure n'importe aucun schéma métier.
     pub(crate) async fn open<F>(path: PathBuf, reader_count: usize, initialize: F) -> Result<Self>
     where
-        F: FnOnce(&mut Connection) -> Result<()> + Send + 'static,
+        F: FnOnce(&Connection) -> Result<()> + Send + 'static,
     {
         if !(1..=16).contains(&reader_count) {
             bail!("Le nombre de lecteurs SQLite doit être compris entre 1 et 16");
@@ -34,8 +34,14 @@ impl Database {
             // Vérifier la base avant toute migration.
             connection::check_integrity(&writer_connection)?;
             connection::configure_writer(&writer_connection)?;
-            // Initialiser le schéma avant d'ouvrir les lecteurs.
-            initialize(&mut writer_connection)?;
+            // Initialiser tous les domaines dans une seule transaction.
+            // Aucune ouverture partielle des tables en cas d'échec.
+            {
+                let transaction = writer_connection
+                    .transaction_with_behavior(TransactionBehavior::Immediate)?;
+                initialize(&transaction)?;
+                transaction.commit()?;
+            }
             let mut reader_connections = Vec::with_capacity(reader_count);
             for _ in 0..reader_count {
                 reader_connections.push(connection::open_reader(&path)?);

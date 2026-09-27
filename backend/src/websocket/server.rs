@@ -12,10 +12,12 @@ use std::{
     io::{self, Write},
     net::Ipv4Addr,
     sync::Arc,
+    time::Duration,
 };
 use tokio::{
     fs,
-    sync::{Mutex, Semaphore},
+    sync::{Mutex, RwLock, Semaphore},
+    time,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -40,6 +42,15 @@ async fn upgrade(
     if origin != Some(state.origin.as_ref()) {
         return (StatusCode::FORBIDDEN, "Origine non autorisée").into_response();
     }
+    if state.shutdown.is_cancelled() {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Backend en cours d'arrêt").into_response();
+    }
+    // Le verrou est acquis avant l'upgrade : l'arrêt attend réellement
+    // la fin de toutes les connexions ayant accès aux stores SQLite.
+    let connection = state.connections.clone().read_owned().await;
+    if state.shutdown.is_cancelled() {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Backend en cours d'arrêt").into_response();
+    }
     ws.max_message_size(256 * 1024).on_upgrade(move |socket| {
         socket::serve(
             socket,
@@ -53,6 +64,7 @@ async fn upgrade(
             state.sessions,
             state.configurations,
             state.shutdown,
+            connection,
         )
     })
 }
@@ -108,9 +120,12 @@ pub(crate) async fn run() -> Result<()> {
     };
 
     let shutdown = CancellationToken::new();
+    let connections = Arc::new(RwLock::new(()));
+    let connections_for_shutdown = connections.clone();
     let memory_for_shutdown = memory.clone();
     let state = ServerState {
         shutdown: shutdown.clone(),
+        connections,
         client,
         token: Arc::from(token),
         origin: Arc::from(origin),
@@ -138,14 +153,18 @@ pub(crate) async fn run() -> Result<()> {
     let signal = shutdown.clone();
     let result = axum::serve(listener, router)
         .with_graceful_shutdown(async move {
-            if tokio::signal::ctrl_c().await.is_ok() {
-                signal.cancel();
-            }
+            termination_signal().await;
+            signal.cancel();
         })
         .await;
-    // Fermer les connexions WebSocket encore actives
-    // avant de demander l'arrêt de SQLite.
     shutdown.cancel();
+    // Toutes les connexions, y compris celles encore en authentification,
+    // doivent terminer leur annulation et libérer leurs clones de SQLite.
+    // Ne jamais fermer la base tant qu'un handler détient une référence.
+    let drain = time::timeout(Duration::from_secs(20), connections_for_shutdown.write())
+        .await
+        .context("Fermeture WebSocket incomplète : SQLite n'est pas arrêté prématurément")?;
+    drop(drain);
     let shutdown_result = match memory_for_shutdown {
         Some(memory) => memory.shutdown().await,
         None => Ok(()),
@@ -153,4 +172,26 @@ pub(crate) async fn run() -> Result<()> {
     result?;
     shutdown_result?;
     Ok(())
+}
+
+async fn termination_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let terminate = async {
+            if let Ok(mut signal) = signal(SignalKind::terminate()) {
+                signal.recv().await;
+            } else {
+                std::future::pending::<()>().await;
+            }
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = terminate => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }

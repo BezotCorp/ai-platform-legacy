@@ -224,7 +224,7 @@ Il comprend :
 
 Les modules métier transmettent leurs opérations à cette infrastructure.
 La mémoire conversationnelle et les sessions réutilisent le même gestionnaire lorsqu'elles partagent une base.
-Le gestionnaire doit tenir compte des opérations engagées et des références actives lors de sa fermeture.
+L'ouverture crée directement les tables actuelles de mémoire, configurations, sessions, archivage et exécutions dans une transaction unique avant de démarrer les lecteurs. Aucun schéma historique ni migration n'est embarqué tant que le projet n'a pas de bases persistantes à préserver. Le gestionnaire doit tenir compte des opérations engagées et des références actives lors de sa fermeture.
 
 ## 9. Mémoire conversationnelle
 
@@ -267,7 +267,7 @@ Au redémarrage, les entrées demeurées `queued` ou `running` deviennent `inter
 
 Le frontend doit lancer le backend comme processus enfant.
 Le backend écoute exclusivement sur `127.0.0.1`, sur un port attribué par le système. Il publie son URL WebSocket sur stdout sous forme d'une ligne JSON, sans exposer le jeton secret.
-Il vérifie l'origine des connexions et exige une authentification avant toute commande applicative.
+Il vérifie l'origine des connexions et exige une authentification avant toute commande applicative. Au signal SIGINT ou SIGTERM, le serveur refuse les nouvelles connexions, annule celles déjà ouvertes, attend leur nettoyage et leurs tâches d'exécution avant de fermer SQLite. Les écritures déjà validées en transaction sont conservées. Si une connexion ne se termine pas dans le délai imparti, le backend signale explicitement l'échec de fermeture au lieu d'ordonner prématurément l'arrêt de la base.
 
 ### 11.1. Configuration
 
@@ -372,7 +372,7 @@ Les fonctionnalités suivantes restent à développer :
 - la politique de rétention et de sauvegarde ;
 - la gestion avancée de la résidence GPU.
 
-Les stratégies actuelles compilent, mais leur comportement avec les différents modèles Ollama reste à valider en conditions réelles.
+Le comportement réel des différents modèles Ollama et des coupures système reste à valider en conditions réelles ; la compilation seule ne démontre pas les garanties opérationnelles décrites.
 
 ## 15. Communication et persistance
 
@@ -397,7 +397,7 @@ Le déploiement du backend n'exige donc pas l'installation séparée de SQLite.
 La base reste facultative. Elle est ouverte lorsque `AI_PLATFORM_MEMORY_DB` est configurée.
 Les sessions utilisent cette même base.
 La mémoire et les sessions sont actuellement cloisonnées par projet. Aucune gestion de comptes utilisateurs n'est implémentée.
-Les messages des sessions sont enregistrés sous forme de JSON dans une colonne SQLite. La mémoire possède ses propres colonnes métier.
+Les messages des sessions sont enregistrés sous forme de JSON dans une colonne SQLite. La mémoire possède ses propres colonnes métier. À ce stade du projet, une base neuve reçoit directement le schéma unique actuel : il n'existe ni schémas intermédiaires ni migration de données héritées. L'utilisation simultanée du même fichier par plusieurs processus backend n'est pas prise en charge.
 
 ### 15.4. Configurations persistantes
 
@@ -436,7 +436,7 @@ Avant chaque nouvelle exécution d'une session liée, le backend archive les mes
 Cette opération est atomique avec l'enregistrement du prompt et du run dans SQLite.
 La conversation complète reste récupérable via `session.archive`, par pages d'au plus 50 messages, dans l'ordre antéchronologique.
 Le curseur exclusif `before_sequence` permet de charger les pages précédentes.
-Le schéma sessions v3 introduit `session_message_archive` et le schéma v4 étend le journal avec le résultat final et la révision de session, ainsi que l'état `queued`. Les bases v1, v2 et v3 sont migrées sans suppression des sessions existantes. Les exécutions historiques ne peuvent pas retrouver rétroactivement une réponse ou une révision qui n'avait jamais été enregistrée.
+Le schéma courant est créé directement avec les archives de messages, le journal des exécutions et leurs résultats finaux. Une contrainte d'unicité partielle empêche deux exécutions `queued` ou `running` sur la même session. Aucune migration historique n'est implémentée tant qu'aucune base réelle antérieure n'est à préserver.
 Une exécution échouée, annulée ou interrompue après sa réservation conserve le prompt et sa révision. Une interruption brutale est marquée `interrupted` à la réouverture du backend, sans reprise automatique de génération. Les transactions SQLite en mode WAL avec synchronisation FULL évitent de publier un succès avant la validation durable de la réponse, mais ne remplacent pas une stratégie de sauvegarde externe. L'ouverture d'une même base simultanément par plusieurs processus backend n'est pas prise en charge par la récupération au démarrage, qui interprète les runs actifs du projet comme ceux d'un processus précédent.
 Une exécution sans session demeure temporaire.
 Le WebSocket existant reste l'unique interface applicative du backend. Aucun CLI supplémentaire n'est introduit.

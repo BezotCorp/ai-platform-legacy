@@ -45,7 +45,13 @@ impl MemoryStore {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
-        let database = Database::open(path, 4, apply).await?;
+        let database = Database::open(path, 4, |connection| {
+            apply(connection)?;
+            crate::configurations::apply(connection)?;
+            crate::sessions::apply(connection)?;
+            Ok(())
+        })
+        .await?;
         Ok(Self {
             database,
             project: project_scope(project_root),

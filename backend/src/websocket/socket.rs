@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    sync::{Mutex, Semaphore, mpsc},
+    sync::{Mutex, OwnedRwLockReadGuard, Semaphore, mpsc},
     task::JoinHandle,
     time,
 };
@@ -53,9 +53,13 @@ pub(crate) async fn serve(
     sessions: Option<SessionStore>,
     configurations: Option<ConfigurationStore>,
     shutdown: CancellationToken,
+    connection_guard: OwnedRwLockReadGuard<()>,
 ) {
     let approvals = ToolApprovalGate::new();
-    let first = tokio::time::timeout(Duration::from_secs(5), socket.recv()).await;
+    let first = tokio::select! {
+        () = shutdown.cancelled() => return,
+        received = time::timeout(Duration::from_secs(5), socket.recv()) => received,
+    };
     let Ok(Some(Ok(WsMessage::Text(text)))) = first else {
         return;
     };
@@ -69,12 +73,29 @@ pub(crate) async fn serve(
     let (tx, mut rx) = mpsc::channel::<Event>(128);
     let writer_closed = CancellationToken::new();
     let writer_closed_task = writer_closed.clone();
+    let writer_shutdown = shutdown.clone();
     let writer = tokio::spawn(async move {
-        while let Some(event) = rx.recv().await {
+        loop {
+            let event = tokio::select! {
+                () = writer_shutdown.cancelled() => break,
+                event = rx.recv() => match event {
+                    Some(event) => event,
+                    None => break,
+                },
+            };
             let Ok(encoded) = serde_json::to_string(&event) else {
                 break;
             };
-            if sink.send(WsMessage::Text(encoded.into())).await.is_err() {
+            // Un client qui ne lit plus ses événements ne doit pas bloquer
+            // les agents, leur annulation ni la fermeture du backend.
+            let sent = tokio::select! {
+                () = writer_shutdown.cancelled() => break,
+                sent = time::timeout(
+                    Duration::from_secs(5),
+                    sink.send(WsMessage::Text(encoded.into())),
+                ) => sent,
+            };
+            if !matches!(sent, Ok(Ok(()))) {
                 break;
             }
         }
@@ -676,6 +697,7 @@ pub(crate) async fn serve(
         token.cancel();
         if time::timeout(Duration::from_secs(5), &mut handle).await.is_err() {
             handle.abort();
+            let _ = handle.await;
             // L'abandon du task Rust ne doit pas laisser un run réservé
             // indéfiniment dans SQLite, même s'il attendait le GPU.
             if let (Some(session_id), Some(store)) = (session_id, sessions.as_ref()) {
@@ -692,4 +714,6 @@ pub(crate) async fn serve(
     }
     drop(tx);
     writer.abort();
+    let _ = writer.await;
+    drop(connection_guard);
 }

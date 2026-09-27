@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::{Mutex, RwLock, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -10,6 +10,7 @@ use crate::{
 #[derive(Clone)]
 pub(crate) struct ServerState {
     pub shutdown: CancellationToken,
+    pub connections: Arc<RwLock<()>>,
     pub client: Client,
     pub token: Arc<str>,
     pub origin: Arc<str>,
