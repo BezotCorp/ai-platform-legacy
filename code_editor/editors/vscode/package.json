@@ -1,0 +1,38 @@
+{
+  "name": "ai-platform-vscode-editor",
+  "displayName": "AI Platform VS Code Editor Integration",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "./dist/lifecycle.js",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiPlatform.currentFile",
+        "title": "AI Platform: Current File"
+      },
+      {
+        "command": "aiPlatform.currentSelection",
+        "title": "AI Platform: Current Selection"
+      },
+      {
+        "command": "aiPlatform.workspaceRoot",
+        "title": "AI Platform: Workspace Root"
+      }
+    ]
+  },
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.6.0"
+  }
+}
