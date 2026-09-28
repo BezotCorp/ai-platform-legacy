@@ -5,8 +5,8 @@ use serde_json::json;
 
 use crate::{
     agents::{
-        AgentResources, AgentServices, AgentTurn, ParticipationPolicy, PopulationSelector,
-        WorkerReport, PopulationDefinition,
+        AgentResources, AgentServices, AgentTurn, ParticipationPolicy, PopulationDefinition,
+        PopulationSelector, WorkerReport,
     },
     event::Event,
     sessions::Message,

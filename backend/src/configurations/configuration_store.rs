@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use rusqlite::{OptionalExtension, params};
 
 use crate::{
@@ -30,17 +30,39 @@ impl ConfigurationStore {
         Ok(())
     }
 
+    fn normalize_title(id: &str, title: Option<String>) -> Result<String> {
+        let title = title.unwrap_or_else(|| id.to_owned());
+        let title = title.trim().to_owned();
+        if title.is_empty() || title.len() > 96 {
+            bail!("Titre de configuration invalide");
+        }
+        Ok(title)
+    }
+
+    fn normalize_description(description: Option<String>) -> Result<String> {
+        let description = description.unwrap_or_default().trim().to_owned();
+        if description.len() > 512 {
+            bail!("Description de configuration trop volumineuse");
+        }
+        Ok(description)
+    }
+
     pub(crate) async fn save(
         &self,
         id: String,
         expected_revision: i64,
+        title: Option<String>,
+        description: Option<String>,
         mode: ExecutionMode,
     ) -> Result<ConfigurationSummary> {
         Self::validate_id(&id)?;
         if expected_revision < 0 {
             bail!("Révision de configuration invalide");
         }
+        let title = Self::normalize_title(&id, title)?;
+        let description = Self::normalize_description(description)?;
         let mode = mode.validate()?;
+        let summary = mode.summary();
         let encoded = serde_json::to_string(&mode)?;
         if encoded.len() > 64 * 1024 {
             bail!("Configuration trop volumineuse");
@@ -53,31 +75,37 @@ impl ConfigurationStore {
                         "INSERT INTO configurations (
                             project,
                             id,
+                            title,
+                            description,
                             mode
                         )
-                        VALUES (?1, ?2, ?3)
+                        VALUES (?1, ?2, ?3, ?4, ?5)
                         ON CONFLICT(project, id)
                         DO NOTHING",
-                        params![project, id, encoded],
+                        params![project, id, title, description, encoded],
                     )?
                 } else {
                     connection.execute(
                         "UPDATE configurations
-                         SET mode = ?3,
+                         SET title = ?3,
+                             description = ?4,
+                             mode = ?5,
                              revision = revision + 1,
                              updated_at = unixepoch()
                          WHERE project = ?1
                            AND id = ?2
-                           AND revision = ?4",
-                        params![project, id, encoded, expected_revision,],
+                           AND revision = ?6",
+                        params![project, id, title, description, encoded, expected_revision],
                     )?
                 };
                 if changed != 1 {
                     bail!("Conflit de révision : configuration existante ou modifiée");
                 }
-                let summary = connection.query_row(
+                let configuration = connection.query_row(
                     "SELECT
                         id,
+                        title,
+                        description,
                         revision,
                         created_at,
                         updated_at
@@ -85,9 +113,9 @@ impl ConfigurationStore {
                      WHERE project = ?1
                        AND id = ?2",
                     params![project, id],
-                    ConfigurationSummary::from_row,
+                    |row| ConfigurationSummary::from_row(row, summary.clone()),
                 )?;
-                Ok(summary)
+                Ok(configuration)
             })
             .await
     }
@@ -101,6 +129,8 @@ impl ConfigurationStore {
                     .query_row(
                         "SELECT
                             id,
+                            title,
+                            description,
                             revision,
                             created_at,
                             updated_at,
@@ -110,24 +140,36 @@ impl ConfigurationStore {
                            AND id = ?2",
                         params![project, id],
                         |row| {
-                            let summary = ConfigurationSummary::from_row(row)?;
-                            let encoded: String = row.get(4)?;
-                            Ok((summary, encoded))
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, String>(2)?,
+                                row.get::<_, i64>(3)?,
+                                row.get::<_, i64>(4)?,
+                                row.get::<_, i64>(5)?,
+                                row.get::<_, String>(6)?,
+                            ))
                         },
                     )
                     .optional()?;
                 stored
-                    .map(|(summary, encoded)| {
-                        let mode: ExecutionMode = serde_json::from_str(&encoded)?;
-                        let mode = mode.validate()?;
-                        Ok(SavedConfiguration {
-                            id: summary.id,
-                            revision: summary.revision,
-                            created_at: summary.created_at,
-                            updated_at: summary.updated_at,
-                            mode,
-                        })
-                    })
+                    .map(
+                        |(id, title, description, revision, created_at, updated_at, encoded)| {
+                            let mode: ExecutionMode = serde_json::from_str(&encoded)?;
+                            let mode = mode.validate()?;
+                            let summary = mode.summary();
+                            Ok(SavedConfiguration {
+                                id,
+                                title,
+                                description,
+                                revision,
+                                created_at,
+                                updated_at,
+                                summary,
+                                mode,
+                            })
+                        },
+                    )
                     .transpose()
             })
             .await
@@ -140,16 +182,45 @@ impl ConfigurationStore {
                 let mut statement = connection.prepare(
                     "SELECT
                         id,
+                        title,
+                        description,
                         revision,
                         created_at,
-                        updated_at
+                        updated_at,
+                        mode
                      FROM configurations
                      WHERE project = ?1
                      ORDER BY updated_at DESC, id
                      LIMIT 50",
                 )?;
-                let rows = statement.query_map(params![project], ConfigurationSummary::from_row)?;
-                Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+                let rows = statement.query_map(params![project], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, String>(6)?,
+                    ))
+                })?;
+                let mut configurations = Vec::new();
+                for row in rows {
+                    let (id, title, description, revision, created_at, updated_at, encoded) = row?;
+                    let mode: ExecutionMode = serde_json::from_str(&encoded)
+                        .with_context(|| format!("Configuration {id} illisible"))?;
+                    let mode = mode.validate()?;
+                    configurations.push(ConfigurationSummary {
+                        id,
+                        title,
+                        description,
+                        revision,
+                        created_at,
+                        updated_at,
+                        mode: mode.summary(),
+                    });
+                }
+                Ok(configurations)
             })
             .await
     }
@@ -167,7 +238,7 @@ impl ConfigurationStore {
                      WHERE project = ?1
                        AND id = ?2
                        AND revision = ?3",
-                    params![project, id, expected_revision,],
+                    params![project, id, expected_revision],
                 )?;
                 Ok(changed == 1)
             })

@@ -14,6 +14,10 @@ pub(crate) enum Command {
         request_id: String,
         configuration_id: String,
         expected_revision: i64,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        description: Option<String>,
         mode: ExecutionMode,
     },
     #[serde(rename = "configuration.load")]

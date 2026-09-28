@@ -410,6 +410,9 @@ Les messages des sessions sont enregistrés sous forme de JSON dans une colonne 
 Les configurations `ExecutionMode` peuvent être enregistrées dans la même base SQLite que les sessions et la mémoire, lorsque celle-ci est activée.
 `ConfigurationStore` permet de créer, modifier, charger, lister et supprimer les configurations.
 Chaque configuration est identifiée par projet, avec une révision empêchant les écrasements concurrents silencieux.
+`configuration.save` accepte aussi des métadonnées UX facultatives : `title` et `description`. Si aucun titre n'est fourni, le backend utilise l'identifiant de configuration comme titre.
+`configuration.list` renvoie les métadonnées et un résumé du mode (`strategy`, `agent_count`, `models`) afin que le frontend puisse présenter des cartes de configurations sans charger chaque définition complète.
+`configuration.load` renvoie le résumé et le `mode` complet.
 Les configurations sont validées avant leur enregistrement et à leur chargement.
 Le contenu des configurations est actuellement encodé en JSON dans SQLite. Ce choix de stockage reste indépendant des structures métier Rust et du protocole WebSocket.
 Les commandes disponibles sont `configuration.save`, `configuration.load`, `configuration.list` et `configuration.delete`.

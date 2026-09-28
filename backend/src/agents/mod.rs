@@ -22,10 +22,10 @@ pub(crate) use context::validate_context_limits;
 pub(crate) use context::{PreparedToolContext, Provenance, ToolContext, ToolExchange, relevance};
 pub(crate) use memory::{MemoryEntry, MemoryStore, apply, checksum, find, project_scope, save};
 pub(crate) use orchestration::{
-    AgentLayer, Aggregation, ExecutionMode, LayeredMoa, MultiAgent, MultiAgentStrategy,
-    ParticipationPolicy, PopulationDefinition, PopulationExecution, PopulationSelection,
-    PopulationSelector, Scheduler, Supervised, SupervisedExecution, SupervisorDecision,
-    SupervisorTurn, WorkerReport,
+    AgentLayer, Aggregation, ExecutionMode, ExecutionModeSummary, LayeredMoa, MultiAgent,
+    MultiAgentStrategy, ParticipationPolicy, PopulationDefinition, PopulationExecution,
+    PopulationSelection, PopulationSelector, Scheduler, Supervised, SupervisedExecution,
+    SupervisorDecision, SupervisorTurn, WorkerReport,
 };
 pub(crate) use tool_call_context::ToolCallContext;
 pub(crate) use tool_invocation::ToolInvocation;

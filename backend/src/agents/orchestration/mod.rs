@@ -14,7 +14,7 @@ mod worker_report;
 
 pub(crate) use agent_layer::AgentLayer;
 pub(crate) use aggregation::Aggregation;
-pub(crate) use execution_mode::ExecutionMode;
+pub(crate) use execution_mode::{ExecutionMode, ExecutionModeSummary};
 pub(crate) use layered_moa::LayeredMoa;
 pub(crate) use multi_agent::MultiAgent;
 pub(crate) use multi_agent_strategy::MultiAgentStrategy;

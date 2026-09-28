@@ -26,10 +26,22 @@ pub(crate) async fn dispatch(
             request_id,
             configuration_id,
             expected_revision,
+            title,
+            description,
             mode,
         }) => {
             let result = match context.configurations.as_ref() {
-                Some(store) => store.save(configuration_id, expected_revision, mode).await,
+                Some(store) => {
+                    store
+                        .save(
+                            configuration_id,
+                            expected_revision,
+                            title,
+                            description,
+                            mode,
+                        )
+                        .await
+                }
                 None => Err(anyhow!("Persistance des configurations désactivée")),
             };
             send(
