@@ -1,42 +1,32 @@
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail};
 use serde_json::json;
-use tokio::sync::{Mutex, mpsc};
-use tokio_util::sync::CancellationToken;
 
 use crate::{
     agents::{
-        MemoryStore, ParticipationPolicy, Population, WorkerReport, agent_turn::AgentTurn,
-        context::limits, orchestration::population::population_selector::PopulationSelector,
+        AgentResources, AgentServices, ParticipationPolicy, Population, WorkerReport, agent_turn::AgentTurn,
+        orchestration::population::population_selector::PopulationSelector,
     },
     event::Event,
-    providers::Client,
     sessions::Message,
-    tools::{self, ToolApprovalGate},
 };
 
 pub(crate) struct PopulationExecution;
 
 impl PopulationExecution {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn run(
         config: &Population,
-        client: &Client,
         history: &[Message],
-        request_id: &str,
-        outbound: &mpsc::Sender<Event>,
-        cancel: &CancellationToken,
-        project_root: &Path,
-        approvals: &ToolApprovalGate,
-        approve_reads: bool,
-        writes: &Arc<Mutex<()>>,
-        memory: Option<&MemoryStore>,
+        services: &AgentServices<'_>,
     ) -> Result<()> {
-        let (context_tokens, output_tokens) = limits()?;
-        let definitions = tools::definitions();
-
-        let tool_tokens = serde_json::to_vec(&definitions)?.len().saturating_add(256);
+        let request_id = services.request_id;
+        let outbound = services.outbound;
+        let cancel = services.cancel;
+        let memory = services.memory;
+        let resources = AgentResources::new()?;
+        let context_tokens = resources.context_tokens;
+        let output_tokens = resources.output_tokens;
 
         let original_request = &history.last().context("Conversation vide")?.content;
 
@@ -63,14 +53,11 @@ impl PopulationExecution {
                 } => {
                     PopulationSelector::select(
                         config,
-                        client,
                         history,
                         &reports,
-                        *min_agents,
-                        *max_agents,
-                        context_tokens,
-                        output_tokens,
-                        cancel,
+                        *min_agents..=*max_agents,
+                        services,
+                        &resources,
                     )
                     .await?
                     .agent_ids
@@ -120,21 +107,10 @@ impl PopulationExecution {
                 let answer = AgentTurn::run(
                     agent,
                     round,
-                    client,
                     agent_history,
                     &previous_round,
-                    request_id,
-                    outbound,
-                    cancel,
-                    project_root,
-                    approvals,
-                    approve_reads,
-                    writes,
-                    memory,
-                    context_tokens,
-                    output_tokens,
-                    tool_tokens,
-                    &definitions,
+                    services,
+                    &resources,
                 )
                 .await?;
 
@@ -182,21 +158,10 @@ impl PopulationExecution {
         let answer = AgentTurn::run(
             &config.facilitator,
             config.rounds,
-            client,
             history,
             &previous_round,
-            request_id,
-            outbound,
-            cancel,
-            project_root,
-            approvals,
-            approve_reads,
-            writes,
-            memory,
-            context_tokens,
-            output_tokens,
-            tool_tokens,
-            &definitions,
+            services,
+            &resources,
         )
         .await?;
 

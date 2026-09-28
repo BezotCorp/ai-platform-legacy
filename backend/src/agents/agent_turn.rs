@@ -1,13 +1,9 @@
-use std::{path::Path, sync::Arc};
-
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
-use tokio::sync::{Mutex, mpsc};
-use tokio_util::sync::CancellationToken;
 
 use crate::{
     agents::{
-        AgentConfig, MemoryStore, ToolContext, context::assemble, tool_invocation::ToolInvocation,
+        AgentConfig, AgentResources, AgentServices, ToolContext, context::assemble, tool_call_context::ToolCallContext, tool_invocation::ToolInvocation,
     },
     event::Event,
     providers::{Chat, Client},
@@ -20,26 +16,22 @@ const MAX_TOTAL_CALLS: usize = 24;
 pub(crate) struct AgentTurn;
 
 impl AgentTurn {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn run(
         agent: &AgentConfig,
         layer_index: usize,
-        client: &Client,
         history: &[Message],
         previous_layer: &[(String, String)],
-        request_id: &str,
-        outbound: &mpsc::Sender<Event>,
-        cancel: &CancellationToken,
-        project_root: &Path,
-        approvals: &crate::tools::ToolApprovalGate,
-        approve_reads: bool,
-        writes: &Arc<Mutex<()>>,
-        memory: Option<&MemoryStore>,
-        context_tokens: usize,
-        output_tokens: usize,
-        tool_tokens: usize,
-        definitions: &[Value],
+        services: &AgentServices<'_>,
+        resources: &AgentResources,
     ) -> Result<String> {
+        let client = services.client;
+        let request_id = services.request_id;
+        let outbound = services.outbound;
+        let cancel = services.cancel;
+        let context_tokens = resources.context_tokens;
+        let output_tokens = resources.output_tokens;
+        let tool_tokens = resources.tool_tokens;
+        let definitions = &resources.definitions;
         if cancel.is_cancelled() {
             bail!("Exécution annulée");
         }
@@ -66,7 +58,7 @@ impl AgentTurn {
              nécessite un aperçu et une \
              approbation explicite."
         );
-        let recalled = if let Some(store) = memory {
+        let recalled = if let Some(store) = services.memory {
             match store
                 .recall(
                     &history.last().context("Conversation vide")?.content,
@@ -248,15 +240,17 @@ impl AgentTurn {
                 let payload = ToolInvocation::execute(
                     name,
                     &arguments,
-                    project_root,
-                    approvals,
-                    approve_reads,
-                    writes,
-                    request_id,
-                    &agent.identity.id,
-                    &call_id,
-                    outbound,
-                    cancel,
+                    &ToolCallContext {
+                        project_root: services.project_root,
+                        approvals: services.approvals,
+                        approve_reads: services.approve_reads,
+                        writes: services.writes,
+                        request_id,
+                        agent_id: &agent.identity.id,
+                        call_id: &call_id,
+                        outbound,
+                        cancel,
+                    },
                 )
                 .await?;
                 tool_results.push(json!({

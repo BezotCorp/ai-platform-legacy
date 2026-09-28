@@ -3,6 +3,7 @@ mod authentication;
 mod command;
 mod command_dispatch;
 mod connection_context;
+mod dispatch_message;
 mod event_writer;
 mod models;
 mod run_execution;

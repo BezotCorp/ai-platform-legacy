@@ -7,6 +7,7 @@ use crate::{
     sessions::SessionStore, tools::ToolApprovalGate,
 };
 
+#[derive(Clone)]
 pub(crate) struct ConnectionContext {
     pub(crate) client: Client,
     pub(crate) gpu: Arc<Semaphore>,

@@ -1,77 +1,38 @@
-use std::{path::Path, sync::Arc};
-
 use anyhow::{Result, bail};
 use serde_json::json;
-use tokio::sync::{Mutex, mpsc};
-use tokio_util::sync::CancellationToken;
 
 use crate::{
     agents::{
-        ExecutionMode, MemoryStore, MultiAgentStrategy, PopulationExecution, Scheduler,
-        SupervisedExecution, agent_turn::AgentTurn, context::limits,
+        AgentResources, AgentServices, ExecutionMode, MultiAgentStrategy, PopulationExecution, Scheduler,
+        SupervisedExecution, agent_turn::AgentTurn,
     },
     event::Event,
-    providers::Client,
     sessions::Message,
-    tools::{self, ToolApprovalGate},
 };
 
 pub(crate) struct AgentExecution;
 
 impl AgentExecution {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn run(
-        client: &Client,
         mode: &ExecutionMode,
         history: &[Message],
-        request_id: &str,
-        outbound: &mpsc::Sender<Event>,
-        cancel: &CancellationToken,
-        project_root: &Path,
-        approvals: &ToolApprovalGate,
-        approve_reads: bool,
-        writes: &Arc<Mutex<()>>,
-        memory: Option<&MemoryStore>,
+        services: &AgentServices<'_>,
     ) -> Result<()> {
+        let request_id = services.request_id;
+        let outbound = services.outbound;
+        let cancel = services.cancel;
+        let memory = services.memory;
         if let ExecutionMode::MultiAgent(multi) = mode
             && let MultiAgentStrategy::Supervised(config) = &multi.strategy
         {
-            return SupervisedExecution::run(
-                config,
-                client,
-                history,
-                request_id,
-                outbound,
-                cancel,
-                project_root,
-                approvals,
-                approve_reads,
-                writes,
-                memory,
-            )
-            .await;
+            return SupervisedExecution::run(config, history, services).await;
         }
         if let ExecutionMode::MultiAgent(multi) = mode
             && let MultiAgentStrategy::Population(config) = &multi.strategy
         {
-            return PopulationExecution::run(
-                config,
-                client,
-                history,
-                request_id,
-                outbound,
-                cancel,
-                project_root,
-                approvals,
-                approve_reads,
-                writes,
-                memory,
-            )
-            .await;
+            return PopulationExecution::run(config, history, services).await;
         }
-        let (context_tokens, output_tokens) = limits()?;
-        let definitions = tools::definitions();
-        let tool_tokens = serde_json::to_vec(&definitions)?.len().saturating_add(256);
+        let resources = AgentResources::new()?;
         let mut previous_layer: Vec<(String, String)> = Vec::new();
         for (layer_index, agents) in Scheduler::plan(mode)?.iter().enumerate() {
             let mut current_layer = Vec::new();
@@ -79,21 +40,10 @@ impl AgentExecution {
                 let answer = AgentTurn::run(
                     agent,
                     layer_index,
-                    client,
                     history,
                     &previous_layer,
-                    request_id,
-                    outbound,
-                    cancel,
-                    project_root,
-                    approvals,
-                    approve_reads,
-                    writes,
-                    memory,
-                    context_tokens,
-                    output_tokens,
-                    tool_tokens,
-                    &definitions,
+                    services,
+                    &resources,
                 )
                 .await?;
                 current_layer.push((agent.identity.id.clone(), answer));

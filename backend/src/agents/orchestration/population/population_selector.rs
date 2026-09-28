@@ -1,28 +1,29 @@
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
-use tokio_util::sync::CancellationToken;
 
 use crate::{
-    agents::{Population, PopulationSelection, WorkerReport, context::assemble},
-    providers::{Chat, Client},
+    agents::{AgentResources, AgentServices, Population, PopulationSelection, WorkerReport, context::assemble},
+    providers::Chat,
     sessions::Message,
 };
 
 pub(crate) struct PopulationSelector;
 
 impl PopulationSelector {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn select(
         config: &Population,
-        client: &Client,
         history: &[Message],
         reports: &[WorkerReport],
-        minimum: usize,
-        maximum: usize,
-        context_tokens: usize,
-        output_tokens: usize,
-        cancel: &CancellationToken,
+        bounds: std::ops::RangeInclusive<usize>,
+        services: &AgentServices<'_>,
+        resources: &AgentResources,
     ) -> Result<PopulationSelection> {
+        let minimum = *bounds.start();
+        let maximum = *bounds.end();
+        let client = services.client;
+        let cancel = services.cancel;
+        let context_tokens = resources.context_tokens;
+        let output_tokens = resources.output_tokens;
         let available = config
             .agents
             .iter()
