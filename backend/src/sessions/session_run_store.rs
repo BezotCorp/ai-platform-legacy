@@ -1,3 +1,5 @@
+use std::slice;
+
 use anyhow::{Context, Result, bail};
 use rusqlite::{OptionalExtension, params};
 
@@ -151,18 +153,20 @@ impl SessionStore {
     pub(crate) async fn start_run(&self, session_id: String, request_id: String) -> Result<()> {
         Self::validate_id(&session_id)?;
         let project = self.project.clone();
-        self.database.write(move |connection| {
-            let changed = connection.execute(
-                "UPDATE session_runs SET status = 'running', updated_at = unixepoch()
+        self.database
+            .write(move |connection| {
+                let changed = connection.execute(
+                    "UPDATE session_runs SET status = 'running', updated_at = unixepoch()
                  WHERE project = ?1 AND session_id = ?2 AND request_id = ?3
                    AND status = 'queued'",
-                params![project, session_id, request_id],
-            )?;
-            if changed != 1 {
-                bail!("Exécution en attente introuvable ou déjà terminée");
-            }
-            Ok(())
-        }).await
+                    params![project, session_id, request_id],
+                )?;
+                if changed != 1 {
+                    bail!("Exécution en attente introuvable ou déjà terminée");
+                }
+                Ok(())
+            })
+            .await
     }
 
     pub(crate) async fn complete_run(
@@ -176,7 +180,7 @@ impl SessionStore {
             role: "assistant".to_owned(),
             content: answer,
         };
-        History::validate(std::slice::from_ref(&response))?;
+        History::validate(slice::from_ref(&response))?;
         let response_content = response.content.clone();
         let project = self.project.clone();
         self.database
@@ -225,7 +229,13 @@ impl SessionStore {
                        AND session_id = ?2
                        AND request_id = ?3
                        AND status = 'running'",
-                    params![project, session_id, request_id, response_content, revision + 1],
+                    params![
+                        project,
+                        session_id,
+                        request_id,
+                        response_content,
+                        revision + 1
+                    ],
                 )?;
                 Ok(revision + 1)
             })
@@ -276,16 +286,20 @@ impl SessionStore {
             bail!("Identifiant d'exécution invalide");
         }
         let project = self.project.clone();
-        self.database.read(move |connection| {
-            Ok(connection.query_row(
-                "SELECT request_id, status, prompt, error, result,
+        self.database
+            .read(move |connection| {
+                Ok(connection
+                    .query_row(
+                        "SELECT request_id, status, prompt, error, result,
                         session_revision, created_at, updated_at
                  FROM session_runs
                  WHERE project = ?1 AND session_id = ?2 AND request_id = ?3",
-                params![project, session_id, request_id],
-                SessionRun::from_row,
-            ).optional()?)
-        }).await
+                        params![project, session_id, request_id],
+                        SessionRun::from_row,
+                    )
+                    .optional()?)
+            })
+            .await
     }
 
     pub(crate) async fn runs(

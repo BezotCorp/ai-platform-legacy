@@ -3,10 +3,11 @@ use serde_json::{Value, json};
 
 use crate::{
     agents::{
-        AgentConfig, AgentResources, AgentServices, ToolContext, context::assemble, tool_call_context::ToolCallContext, tool_invocation::ToolInvocation,
+        AgentConfig, AgentResources, AgentServices, ToolCallContext, ToolContext, ToolInvocation,
+        context::assemble,
     },
     event::Event,
-    providers::{Chat, Client},
+    providers::Chat,
     sessions::Message,
 };
 

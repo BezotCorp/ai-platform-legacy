@@ -21,30 +21,23 @@ impl PopulationSelection {
         if response.len() > 4096 {
             bail!("Population selection response too large");
         }
-
         let selection: Self = serde_json::from_str(response)?;
-
         if selection.agent_ids.len() < minimum || selection.agent_ids.len() > maximum {
             bail!("Adaptive population size outside configured bounds");
         }
-
         let available: HashSet<&str> = agents
             .iter()
             .map(|agent| agent.identity.id.as_str())
             .collect();
-
         let mut selected = HashSet::new();
-
         for identifier in &selection.agent_ids {
             if !available.contains(identifier.as_str()) {
                 bail!("Unknown population participant");
             }
-
             if !selected.insert(identifier.as_str()) {
                 bail!("Duplicate selected participant");
             }
         }
-
         Ok(selection)
     }
 }

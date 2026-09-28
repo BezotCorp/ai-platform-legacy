@@ -10,7 +10,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, TransactionBehavior};
 
-use crate::sqlite::{connection, database_inner::DatabaseInner, readers::Readers, writer::Writer};
+use crate::sqlite::{DatabaseInner, Readers, Writer, connection};
 
 #[derive(Clone)]
 pub(crate) struct Database {
@@ -37,8 +37,8 @@ impl Database {
             // Initialiser tous les domaines dans une seule transaction.
             // Aucune ouverture partielle des tables en cas d'échec.
             {
-                let transaction = writer_connection
-                    .transaction_with_behavior(TransactionBehavior::Immediate)?;
+                let transaction =
+                    writer_connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
                 initialize(&transaction)?;
                 transaction.commit()?;
             }
@@ -47,7 +47,6 @@ impl Database {
                 reader_connections.push(connection::open_reader(&path)?);
             }
             let healthy = Arc::new(AtomicBool::new(true));
-
             let readers = Readers::start(reader_connections, Arc::clone(&healthy))?;
             let writer = match Writer::start(writer_connection, Arc::clone(&healthy)) {
                 Ok(writer) => writer,

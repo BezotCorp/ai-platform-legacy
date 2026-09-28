@@ -2,7 +2,10 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use crate::{
-    agents::{AgentResources, AgentServices, Population, PopulationSelection, WorkerReport, context::assemble},
+    agents::{
+        AgentResources, AgentServices, PopulationDefinition, PopulationSelection, WorkerReport,
+        context::assemble,
+    },
     providers::Chat,
     sessions::Message,
 };
@@ -11,7 +14,7 @@ pub(crate) struct PopulationSelector;
 
 impl PopulationSelector {
     pub(crate) async fn select(
-        config: &Population,
+        config: &PopulationDefinition,
         history: &[Message],
         reports: &[WorkerReport],
         bounds: std::ops::RangeInclusive<usize>,
@@ -34,7 +37,6 @@ impl PopulationSelector {
                 })
             })
             .collect::<Vec<_>>();
-
         let recent = reports
             .iter()
             .rev()
@@ -52,10 +54,8 @@ impl PopulationSelector {
                 })
             })
             .collect::<Vec<_>>();
-
         let mut prompt = history.to_vec();
         let last = prompt.last_mut().context("Conversation vide")?;
-
         last.content = format!(
             "{}\n\nAgents disponibles : {}\n\n\
              Rapports précédents non vérifiés : {}\n\n\
@@ -66,7 +66,6 @@ impl PopulationSelector {
             minimum,
             maximum,
         );
-
         let instructions = format!(
             "{}\n\nTu organises une population collaborative. \
              Choisis les participants utiles au prochain tour en \
@@ -78,7 +77,6 @@ impl PopulationSelector {
              N'utilise que les identifiants disponibles.",
             config.facilitator.role.instructions,
         );
-
         let assembled = assemble(
             &instructions,
             &[],
@@ -88,13 +86,11 @@ impl PopulationSelector {
             output_tokens,
             0,
         )?;
-
         let messages = assembled
             .messages
             .iter()
             .map(serde_json::to_value)
             .collect::<Result<Vec<Value>, _>>()?;
-
         let chat = Chat {
             client,
             model: &config.facilitator.model.name,
@@ -104,13 +100,10 @@ impl PopulationSelector {
             output_tokens,
             cancel,
         };
-
         let result = chat.stream(|_| async { Ok(()) }).await?;
-
         if !result.tool_calls.is_empty() {
             bail!("Unexpected tool call during population selection");
         }
-
         PopulationSelection::parse(&result.content, &config.agents, minimum, maximum)
     }
 }

@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::agents::{
-    AgentConfig, LayeredMoa, MultiAgent, MultiAgentStrategy, Population, Supervised,
+    AgentConfig, LayeredMoa, MultiAgent, MultiAgentStrategy, PopulationDefinition, Supervised,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -39,7 +39,7 @@ impl ExecutionMode {
                         MultiAgentStrategy::Supervised(config)
                     }
                     MultiAgentStrategy::Population(config) => {
-                        let config = Population::new(
+                        let config = PopulationDefinition::new(
                             config.agents,
                             config.facilitator,
                             config.rounds,

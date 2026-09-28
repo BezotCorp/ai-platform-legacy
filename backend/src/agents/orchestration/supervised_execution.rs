@@ -5,8 +5,8 @@ use serde_json::json;
 
 use crate::{
     agents::{
-        AgentResources, AgentServices, Supervised, SupervisorDecision, WorkerReport, agent_turn::AgentTurn,
-        orchestration::supervisor_turn::SupervisorTurn,
+        AgentResources, AgentServices, AgentTurn, Supervised, SupervisorDecision, SupervisorTurn,
+        WorkerReport,
     },
     event::Event,
     sessions::Message,
@@ -109,15 +109,9 @@ impl SupervisedExecution {
                             task,
                         ),
                     });
-                    let answer = AgentTurn::run(
-                        worker,
-                        step,
-                        agent_history,
-                        &[],
-                        services,
-                        &resources,
-                    )
-                    .await?;
+                    let answer =
+                        AgentTurn::run(worker, step, agent_history, &[], services, &resources)
+                            .await?;
                     agent_history.push(Message {
                         role: "assistant".to_owned(),
                         content: answer.clone(),

@@ -25,7 +25,6 @@ impl ToolInvocation {
                 };
                 let preview = proposal.preview();
                 let preview_sha256 = ToolApprovalGate::preview_sha256(&preview)?;
-
                 context
                     .outbound
                     .send(Event::new(
@@ -39,7 +38,6 @@ impl ToolInvocation {
                         }),
                     ))
                     .await?;
-
                 context
                     .approvals
                     .request(ApprovalRequest {
@@ -53,16 +51,13 @@ impl ToolInvocation {
                         cancel: context.cancel,
                     })
                     .await?;
-
                 let guard = tokio::select! {
                     () = context.cancel.cancelled() => bail!("Exécution annulée"),
                     guard = Arc::clone(context.writes).lock_owned() => guard,
                 };
-
                 if context.cancel.is_cancelled() {
                     bail!("Exécution annulée");
                 }
-
                 proposal.commit(guard).await
             } else {
                 if context.approve_reads {
@@ -80,7 +75,6 @@ impl ToolInvocation {
                         })
                         .await?;
                 }
-
                 tokio::select! {
                     () = context.cancel.cancelled() => bail!("Exécution annulée"),
                     result = tools::execute(context.project_root, name, arguments) => result,
@@ -88,7 +82,6 @@ impl ToolInvocation {
             }
         }
         .await;
-
         let payload = match result {
             Ok(value) => {
                 context
@@ -123,7 +116,6 @@ impl ToolInvocation {
                 json!({ "ok": false, "error": error.to_string() })
             }
         };
-
         Ok(payload)
     }
 }

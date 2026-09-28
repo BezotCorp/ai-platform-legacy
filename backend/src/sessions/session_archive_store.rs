@@ -4,7 +4,7 @@ use rusqlite::params;
 use crate::sessions::{ArchivedMessage, Message, SessionStore};
 
 impl SessionStore {
-/// Pages d'archives ordonnées de la plus récente à la plus ancienne.
+    /// Pages d'archives ordonnées de la plus récente à la plus ancienne.
     pub(crate) async fn archive(
         &self,
         session_id: String,

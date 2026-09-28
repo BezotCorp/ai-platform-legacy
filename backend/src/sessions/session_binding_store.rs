@@ -120,7 +120,6 @@ impl SessionStore {
                                 created_at: row.get(2)?,
                                 updated_at: row.get(3)?,
                             };
-
                             Ok((
                                 session,
                                 row.get::<_, String>(4)?,

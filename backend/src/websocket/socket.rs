@@ -8,8 +8,8 @@ use crate::{
     event::Event,
     tools::ToolApprovalGate,
     websocket::{
-        ActiveRun, ConnectionContext, RunRequest, ServerState, authentication::authenticate,
-        command_dispatch::dispatch, dispatch_message::DispatchMessage, event_writer::EventWriter,
+        ActiveRun, ConnectionContext, DispatchMessage, EventWriter, RunRequest, ServerState,
+        authentication::authenticate, command_dispatch::dispatch,
     },
 };
 pub(crate) async fn serve(
@@ -41,7 +41,6 @@ pub(crate) async fn serve(
     let worker_context = context.clone();
     let worker_events = tx.clone();
     let worker_closed = writer.closed.clone();
-
     let worker = tokio::spawn(async move {
         loop {
             let next = tokio::select! {
@@ -49,7 +48,6 @@ pub(crate) async fn serve(
                 () = worker_closed.cancelled() => break,
                 next = received_commands.recv() => next,
             };
-
             match next {
                 Some(DispatchMessage::Execute(value)) => {
                     if !dispatch(value, &worker_context, &None, &worker_events).await {
@@ -63,7 +61,6 @@ pub(crate) async fn serve(
             }
         }
     });
-
     loop {
         let frame = tokio::select! {
             () = context.shutdown.cancelled() => break,
@@ -101,7 +98,6 @@ pub(crate) async fn serve(
             if !queued {
                 break;
             }
-
             let drained = tokio::select! {
                 () = context.shutdown.cancelled() => false,
                 () = writer.closed.cancelled() => false,
@@ -110,7 +106,6 @@ pub(crate) async fn serve(
             if !drained {
                 break;
             }
-
             start_run(value, &context, tx.clone(), &mut active).await;
         } else if matches!(
             value.get("type").and_then(Value::as_str),
@@ -135,7 +130,6 @@ pub(crate) async fn serve(
             }
         }
     }
-
     drop(commands);
     worker.abort();
     let _ = worker.await;

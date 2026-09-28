@@ -165,7 +165,6 @@ impl RunExecution {
                 }),
             ))
             .await;
-
         let permit = tokio::select! {
             () = cancel.cancelled() => {
                 let (status, reason) = self.cancellation();
@@ -188,7 +187,6 @@ impl RunExecution {
                 }
             }
         };
-
         // La déconnexion peut arriver pendant l'attente du sémaphore.
         if cancel.is_cancelled() {
             let (status, reason) = self.cancellation();
@@ -254,11 +252,9 @@ impl RunExecution {
         let trace_store = self.sessions.clone();
         let trace_session = session_id.clone();
         let trace_run = request_id.clone();
-
         let forward = tokio::spawn(async move {
             let mut final_answer = None;
             let mut trace_error = None;
-
             while let Some(event) = run_rx.recv().await {
                 if event.kind == "run.completed" {
                     final_answer = event

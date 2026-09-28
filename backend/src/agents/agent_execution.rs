@@ -3,8 +3,8 @@ use serde_json::json;
 
 use crate::{
     agents::{
-        AgentResources, AgentServices, ExecutionMode, MultiAgentStrategy, PopulationExecution, Scheduler,
-        SupervisedExecution, agent_turn::AgentTurn,
+        AgentResources, AgentServices, AgentTurn, ExecutionMode, MultiAgentStrategy,
+        PopulationExecution, Scheduler, SupervisedExecution,
     },
     event::Event,
     sessions::Message,

@@ -11,7 +11,7 @@ use tokio::{
 
 use crate::{
     event::Event,
-    tools::{ApprovalRequest, pending_approval::PendingApproval},
+    tools::{ApprovalRequest, PendingApproval},
 };
 
 #[derive(Clone, Default)]
@@ -84,7 +84,6 @@ impl ToolApprovalGate {
                 },
             );
         }
-
         let notification = Event::new(
             "approval.required",
             request.request_id,
@@ -96,25 +95,21 @@ impl ToolApprovalGate {
                 "preview_sha256": request.preview_sha256,
             }),
         );
-
         let result = async {
             select! {
                 () = request.cancel.cancelled() => bail!("Exécution annulée"),
                 delivered = request.outbound.send(notification) => { delivered?; }
             }
-
             let decision = select! {
                 () = request.cancel.cancelled() => bail!("Exécution annulée"),
                 result = time::timeout(Duration::from_secs(120), receiver) => result??,
             };
-
             if !decision {
                 bail!("Autorisation refusée");
             }
             Ok(())
         }
         .await;
-
         self.pending.lock().await.remove(&key);
         result
     }

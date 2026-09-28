@@ -2,7 +2,7 @@ use std::env;
 
 use anyhow::{Result, bail};
 
-pub(crate) fn limits() -> Result<(usize, usize)> {
+pub(crate) fn validate_context_limits() -> Result<(usize, usize)> {
     let context_tokens = env::var("AI_PLATFORM_NUM_CTX")
         .ok()
         .map(|value| value.parse::<usize>())

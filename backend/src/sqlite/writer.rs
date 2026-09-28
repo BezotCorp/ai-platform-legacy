@@ -7,7 +7,7 @@ use anyhow::Result;
 use rusqlite::{Connection, TransactionBehavior};
 use tokio::sync::mpsc;
 
-use crate::sqlite::job::Job;
+use crate::sqlite::Job;
 
 pub(crate) struct Writer {
     sender: mpsc::Sender<Job>,

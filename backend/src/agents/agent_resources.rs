@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::{agents::context::limits, tools};
+use crate::{agents::validate_context_limits, tools};
 
 pub(crate) struct AgentResources {
     pub context_tokens: usize,
@@ -12,10 +12,9 @@ pub(crate) struct AgentResources {
 
 impl AgentResources {
     pub(crate) fn new() -> Result<Self> {
-        let (context_tokens, output_tokens) = limits()?;
+        let (context_tokens, output_tokens) = validate_context_limits()?;
         let definitions = tools::definitions();
         let tool_tokens = serde_json::to_vec(&definitions)?.len().saturating_add(256);
-
         Ok(Self {
             context_tokens,
             output_tokens,

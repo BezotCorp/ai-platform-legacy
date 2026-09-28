@@ -12,7 +12,7 @@ use std::{
 
 use crate::{
     file_manager::{FILE_TOO_LARGE, FileManager},
-    tools::{file_snapshot::FileSnapshot, permissions},
+    tools::{FileSnapshot, permissions},
 };
 
 const MAX_FILE_BYTES: usize = 128 * 1024;

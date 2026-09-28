@@ -15,6 +15,8 @@ mod socket;
 pub(crate) use active_run::ActiveRun;
 pub(crate) use command::Command;
 pub(crate) use connection_context::ConnectionContext;
+pub(crate) use dispatch_message::DispatchMessage;
+pub(crate) use event_writer::EventWriter;
 pub(crate) use run_execution::{RunExecution, STOP_DISCONNECTED, STOP_USER};
 pub(crate) use run_request::RunRequest;
 pub(crate) use server::run;

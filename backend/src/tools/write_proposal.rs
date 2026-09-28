@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use similar::TextDiff;
 use tokio::{sync::OwnedMutexGuard, task};
 
-use crate::tools::{anchored_path::AnchoredPath, file_snapshot::FileSnapshot};
+use crate::tools::{AnchoredPath, FileSnapshot};
 
 const MAX_SOURCE: usize = 128 * 1024;
 const MAX_PREVIEW: usize = 48 * 1024;
