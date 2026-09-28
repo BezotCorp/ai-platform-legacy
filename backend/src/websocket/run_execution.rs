@@ -12,7 +12,7 @@ use tokio::sync::{Mutex, Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    agents::{AgentExecution, MemoryStore},
+    agents::{AgentExecution, AgentServices, MemoryStore},
     configurations::ConfigurationStore,
     event::Event,
     providers::Client,
@@ -165,7 +165,6 @@ impl RunExecution {
                 }),
             ))
             .await;
-
         let permit = tokio::select! {
             () = cancel.cancelled() => {
                 let (status, reason) = self.cancellation();
@@ -188,7 +187,6 @@ impl RunExecution {
                 }
             }
         };
-
         // La déconnexion peut arriver pendant l'attente du sémaphore.
         if cancel.is_cancelled() {
             let (status, reason) = self.cancellation();
@@ -254,11 +252,9 @@ impl RunExecution {
         let trace_store = self.sessions.clone();
         let trace_session = session_id.clone();
         let trace_run = request_id.clone();
-
         let forward = tokio::spawn(async move {
             let mut final_answer = None;
             let mut trace_error = None;
-
             while let Some(event) = run_rx.recv().await {
                 if event.kind == "run.completed" {
                     final_answer = event
@@ -329,17 +325,19 @@ impl RunExecution {
             (final_answer, trace_error)
         });
         let result = AgentExecution::run(
-            &self.client,
             &mode,
             &history,
-            &request_id,
-            &run_tx,
-            &cancel,
-            &self.project_root,
-            &self.approvals,
-            self.approve_reads,
-            &self.writes,
-            self.memory.as_ref(),
+            &AgentServices {
+                client: &self.client,
+                request_id: &request_id,
+                outbound: &run_tx,
+                cancel: &cancel,
+                project_root: &self.project_root,
+                approvals: &self.approvals,
+                approve_reads: self.approve_reads,
+                writes: &self.writes,
+                memory: self.memory.as_ref(),
+            },
         )
         .await;
         drop(run_tx);

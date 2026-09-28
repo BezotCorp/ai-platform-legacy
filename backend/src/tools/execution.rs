@@ -11,7 +11,7 @@ use tokio::task;
 
 use crate::{
     file_manager::FileManager,
-    tools::{anchored_path::AnchoredPath, permissions},
+    tools::{AnchoredPath, permissions},
 };
 
 const MAX_VISITED: usize = 4000;

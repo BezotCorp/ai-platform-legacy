@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 pub(crate) enum ParticipationPolicy {
     #[default]
     Fixed,
-
     Adaptive {
         min_agents: usize,
         max_agents: usize,

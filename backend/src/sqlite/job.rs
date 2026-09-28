@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, TransactionBehavior};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::sqlite::{operation::Operation, operation_result::OperationResult};
+use crate::sqlite::{Operation, OperationResult};
 
 pub(crate) struct Job {
     pub operation: Operation,

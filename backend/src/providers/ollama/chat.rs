@@ -55,11 +55,12 @@ impl Chat<'_> {
                 }
                 part = stream.next() => part,
             };
-            let Some(part) = part else {
-                break;
+            let bytes = match part {
+                Some(part) => part?.to_vec(),
+                None if !frame.is_empty() => vec![b'\n'],
+                None => break,
             };
-            let bytes = part?;
-            for byte in bytes.iter().copied() {
+            for byte in bytes {
                 if byte != b'\n' {
                     frame.push(byte);
                     if frame.len() > MAX_FRAME_BYTES {

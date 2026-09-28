@@ -6,7 +6,7 @@ use crate::agents::{AgentConfig, ParticipationPolicy};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Population {
+pub(crate) struct PopulationDefinition {
     pub agents: Vec<AgentConfig>,
     pub facilitator: AgentConfig,
     pub rounds: usize,
@@ -15,7 +15,7 @@ pub(crate) struct Population {
     pub participation: ParticipationPolicy,
 }
 
-impl Population {
+impl PopulationDefinition {
     pub(crate) fn new(
         agents: Vec<AgentConfig>,
         facilitator: AgentConfig,
@@ -25,30 +25,24 @@ impl Population {
         if !(2..=4).contains(&agents.len()) {
             return Err("A population requires two to four agents");
         }
-
         if !(1..=4).contains(&rounds) {
             return Err("Invalid population round count");
         }
-
         let mut identifiers = HashSet::new();
         identifiers.insert(&facilitator.identity.id);
-
         for agent in &agents {
             if !identifiers.insert(&agent.identity.id) {
                 return Err("Duplicate population agent identifier");
             }
         }
-
         if let ParticipationPolicy::Adaptive {
             min_agents,
             max_agents,
         } = &participation
+            && (*min_agents == 0 || min_agents > max_agents || *max_agents > agents.len())
         {
-            if *min_agents == 0 || min_agents > max_agents || *max_agents > agents.len() {
-                return Err("Invalid adaptive population bounds");
-            }
+            return Err("Invalid adaptive population bounds");
         }
-
         Ok(Self {
             agents,
             facilitator,

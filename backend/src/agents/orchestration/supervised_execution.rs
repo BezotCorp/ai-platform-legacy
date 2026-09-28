@@ -1,41 +1,33 @@
-use std::{collections::HashMap, path::Path, sync::Arc};
+use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail};
 use serde_json::json;
-use tokio::sync::{Mutex, mpsc};
-use tokio_util::sync::CancellationToken;
 
 use crate::{
     agents::{
-        MemoryStore, Supervised, SupervisorDecision, WorkerReport, agent_turn::AgentTurn,
-        context::limits, orchestration::supervisor_turn::SupervisorTurn,
+        AgentResources, AgentServices, AgentTurn, Supervised, SupervisorDecision, SupervisorTurn,
+        WorkerReport,
     },
     event::Event,
-    providers::Client,
     sessions::Message,
-    tools::{self, ToolApprovalGate},
 };
 
 pub(crate) struct SupervisedExecution;
 
 impl SupervisedExecution {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn run(
         config: &Supervised,
-        client: &Client,
         history: &[Message],
-        request_id: &str,
-        outbound: &mpsc::Sender<Event>,
-        cancel: &CancellationToken,
-        project_root: &Path,
-        approvals: &ToolApprovalGate,
-        approve_reads: bool,
-        writes: &Arc<Mutex<()>>,
-        memory: Option<&MemoryStore>,
+        services: &AgentServices<'_>,
     ) -> Result<()> {
-        let (context_tokens, output_tokens) = limits()?;
-        let definitions = tools::definitions();
-        let tool_tokens = serde_json::to_vec(&definitions)?.len().saturating_add(256);
+        let client = services.client;
+        let request_id = services.request_id;
+        let outbound = services.outbound;
+        let cancel = services.cancel;
+        let memory = services.memory;
+        let resources = AgentResources::new()?;
+        let context_tokens = resources.context_tokens;
+        let output_tokens = resources.output_tokens;
         let mut worker_histories: HashMap<String, Vec<Message>> = HashMap::new();
         let mut reports = Vec::<WorkerReport>::new();
 
@@ -117,26 +109,9 @@ impl SupervisedExecution {
                             task,
                         ),
                     });
-                    let answer = AgentTurn::run(
-                        worker,
-                        step,
-                        client,
-                        agent_history,
-                        &[],
-                        request_id,
-                        outbound,
-                        cancel,
-                        project_root,
-                        approvals,
-                        approve_reads,
-                        writes,
-                        memory,
-                        context_tokens,
-                        output_tokens,
-                        tool_tokens,
-                        &definitions,
-                    )
-                    .await?;
+                    let answer =
+                        AgentTurn::run(worker, step, agent_history, &[], services, &resources)
+                            .await?;
                     agent_history.push(Message {
                         role: "assistant".to_owned(),
                         content: answer.clone(),

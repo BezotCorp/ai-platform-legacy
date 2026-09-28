@@ -51,22 +51,8 @@ async fn upgrade(
     if state.shutdown.is_cancelled() {
         return (StatusCode::SERVICE_UNAVAILABLE, "Backend en cours d'arrêt").into_response();
     }
-    ws.max_message_size(256 * 1024).on_upgrade(move |socket| {
-        socket::serve(
-            socket,
-            state.client,
-            state.token,
-            state.gpu,
-            state.project_root,
-            state.writes,
-            state.approve_reads,
-            state.memory,
-            state.sessions,
-            state.configurations,
-            state.shutdown,
-            connection,
-        )
-    })
+    ws.max_message_size(256 * 1024)
+        .on_upgrade(move |socket| socket::serve(socket, state, connection))
 }
 
 pub(crate) async fn run() -> Result<()> {

@@ -5,27 +5,23 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::{
     select,
-    sync::{Mutex, mpsc, oneshot},
+    sync::{Mutex, oneshot},
     time,
 };
-use tokio_util::sync::CancellationToken;
 
-use crate::event::Event;
-
-type Pending = (Option<String>, oneshot::Sender<bool>);
+use crate::{
+    event::Event,
+    tools::{ApprovalRequest, PendingApproval},
+};
 
 #[derive(Clone, Default)]
 pub(crate) struct ToolApprovalGate {
-    pending: Arc<Mutex<HashMap<String, Pending>>>,
+    pending: Arc<Mutex<HashMap<(String, String), PendingApproval>>>,
 }
 
 impl ToolApprovalGate {
     pub(crate) fn new() -> Self {
         Self::default()
-    }
-
-    fn key(request_id: &str, call_id: &str) -> String {
-        format!("{request_id}:{call_id}")
     }
 
     pub(crate) fn preview_sha256(preview: &Value) -> Result<String> {
@@ -41,11 +37,11 @@ impl ToolApprovalGate {
             let mut pending = self.pending.lock().await;
             pending
                 .drain()
-                .map(|(_, (_, sender))| sender)
+                .map(|(_, request)| request.response)
                 .collect::<Vec<_>>()
         };
-        for sender in pending {
-            let _ = sender.send(false);
+        for response in pending {
+            let _ = response.send(false);
         }
     }
 
@@ -56,72 +52,57 @@ impl ToolApprovalGate {
         approved: bool,
         preview_sha256: Option<&str>,
     ) -> bool {
-        let key = Self::key(request_id, call_id);
+        let key = (request_id.to_owned(), call_id.to_owned());
         let mut pending = self.pending.lock().await;
-        let Some((expected, _)) = pending.get(&key) else {
+        let Some(request) = pending.get(&key) else {
             return false;
         };
-        if approved && expected.as_deref() != preview_sha256 {
+        if approved && request.expected_sha256.as_deref() != preview_sha256 {
             return false;
         }
-        let Some((_, sender)) = pending.remove(&key) else {
+        let Some(request) = pending.remove(&key) else {
             return false;
         };
         drop(pending);
-        sender.send(approved).is_ok()
+        request.response.send(approved).is_ok()
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn request(
-        &self,
-        request_id: &str,
-        agent_id: &str,
-        call_id: &str,
-        tool: &str,
-        arguments: &Value,
-        preview_sha256: Option<&str>,
-        outbound: &mpsc::Sender<Event>,
-        cancel: &CancellationToken,
-    ) -> Result<()> {
-        let key = Self::key(request_id, call_id);
-        let (sender, receiver) = oneshot::channel();
+    pub(crate) async fn request(&self, request: ApprovalRequest<'_>) -> Result<()> {
+        let key = (request.request_id.to_owned(), request.call_id.to_owned());
+        let (response, receiver) = oneshot::channel();
+
         {
             let mut pending = self.pending.lock().await;
             if pending.contains_key(&key) {
                 bail!("Identifiant d'autorisation dupliqué");
             }
-            pending.insert(key.clone(), (preview_sha256.map(str::to_owned), sender));
+            pending.insert(
+                key.clone(),
+                PendingApproval {
+                    expected_sha256: request.preview_sha256.map(str::to_owned),
+                    response,
+                },
+            );
         }
         let notification = Event::new(
             "approval.required",
-            request_id,
+            request.request_id,
             json!({
-                "agent_id": agent_id,
-                "call_id": call_id,
-                "tool": tool,
-                "arguments": arguments,
-                "preview_sha256": preview_sha256,
+                "agent_id": request.agent_id,
+                "call_id": request.call_id,
+                "tool": request.tool,
+                "arguments": request.arguments,
+                "preview_sha256": request.preview_sha256,
             }),
         );
         let result = async {
             select! {
-                () = cancel.cancelled() => {
-                    bail!("Exécution annulée");
-                }
-                delivered = outbound.send(notification) => {
-                    delivered?;
-                }
+                () = request.cancel.cancelled() => bail!("Exécution annulée"),
+                delivered = request.outbound.send(notification) => { delivered?; }
             }
             let decision = select! {
-                () = cancel.cancelled() => {
-                    bail!("Exécution annulée");
-                }
-                result = time::timeout(
-                    Duration::from_secs(120),
-                    receiver,
-                ) => {
-                    result??
-                }
+                () = request.cancel.cancelled() => bail!("Exécution annulée"),
+                result = time::timeout(Duration::from_secs(120), receiver) => result??,
             };
             if !decision {
                 bail!("Autorisation refusée");

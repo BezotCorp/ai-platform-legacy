@@ -1,60 +1,66 @@
 use axum::extract::ws::{Message as WsMessage, WebSocket};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use std::{
-    path::PathBuf,
-    sync::{Arc, atomic::AtomicU8},
-};
-use tokio::sync::{Mutex, OwnedRwLockReadGuard, Semaphore, mpsc};
-use tokio_util::sync::CancellationToken;
+use std::sync::{Arc, atomic::AtomicU8};
+use tokio::sync::{OwnedRwLockReadGuard, mpsc, oneshot};
 
 use crate::{
-    agents::MemoryStore,
-    configurations::ConfigurationStore,
     event::Event,
-    providers::Client,
-    sessions::SessionStore,
     tools::ToolApprovalGate,
     websocket::{
-        ActiveRun, ConnectionContext, RunRequest, authentication::authenticate,
-        command_dispatch::dispatch, event_writer::EventWriter,
+        ActiveRun, ConnectionContext, DispatchMessage, EventWriter, RunRequest, ServerState,
+        authentication::authenticate, command_dispatch::dispatch,
     },
 };
 pub(crate) async fn serve(
     mut socket: WebSocket,
-    client: Client,
-    expected_token: Arc<str>,
-    gpu: Arc<Semaphore>,
-    project_root: Arc<PathBuf>,
-    writes: Arc<Mutex<()>>,
-    approve_reads: bool,
-    memory: Option<MemoryStore>,
-    sessions: Option<SessionStore>,
-    configurations: Option<ConfigurationStore>,
-    shutdown: CancellationToken,
+    state: ServerState,
     connection_guard: OwnedRwLockReadGuard<()>,
 ) {
-    if !authenticate(&mut socket, &expected_token, &shutdown).await {
+    if !authenticate(&mut socket, &state.token, &state.shutdown).await {
         return;
     }
     let context = ConnectionContext {
-        client,
-        gpu,
-        project_root,
-        writes,
-        approve_reads,
-        memory,
-        sessions,
-        configurations,
+        client: state.client,
+        gpu: state.gpu,
+        project_root: state.project_root,
+        writes: state.writes,
+        approve_reads: state.approve_reads,
+        memory: state.memory,
+        sessions: state.sessions,
+        configurations: state.configurations,
         approvals: ToolApprovalGate::new(),
-        shutdown,
+        shutdown: state.shutdown,
     };
     let (sink, mut stream) = socket.split();
     let writer = EventWriter::spawn(sink, context.shutdown.clone());
     let tx = writer.outbound.clone();
     let _ = tx.send(Event::new("authenticated", "", json!({}))).await;
     let mut active = None;
-
+    let (commands, mut received_commands) = mpsc::channel::<DispatchMessage>(64);
+    let worker_context = context.clone();
+    let worker_events = tx.clone();
+    let worker_closed = writer.closed.clone();
+    let worker = tokio::spawn(async move {
+        loop {
+            let next = tokio::select! {
+                () = worker_context.shutdown.cancelled() => break,
+                () = worker_closed.cancelled() => break,
+                next = received_commands.recv() => next,
+            };
+            match next {
+                Some(DispatchMessage::Execute(value)) => {
+                    if !dispatch(value, &worker_context, &None, &worker_events).await {
+                        break;
+                    }
+                }
+                Some(DispatchMessage::Drain(acknowledge)) => {
+                    let _ = acknowledge.send(());
+                }
+                None => break,
+            }
+        }
+    });
     loop {
         let frame = tokio::select! {
             () = context.shutdown.cancelled() => break,
@@ -83,10 +89,28 @@ pub(crate) async fn serve(
                     .await;
                 continue;
             }
+            let (acknowledge, completed) = oneshot::channel();
+            let queued = tokio::select! {
+                () = context.shutdown.cancelled() => false,
+                () = writer.closed.cancelled() => false,
+                result = commands.send(DispatchMessage::Drain(acknowledge)) => result.is_ok(),
+            };
+            if !queued {
+                break;
+            }
+            let drained = tokio::select! {
+                () = context.shutdown.cancelled() => false,
+                () = writer.closed.cancelled() => false,
+                result = completed => result.is_ok(),
+            };
+            if !drained {
+                break;
+            }
             start_run(value, &context, tx.clone(), &mut active).await;
-        } else {
-            // Les lectures, écritures et appels Ollama peuvent attendre :
-            // l'arrêt du backend doit pouvoir annuler la commande en cours.
+        } else if matches!(
+            value.get("type").and_then(Value::as_str),
+            Some("run.cancel" | "approval.resolve")
+        ) {
             let keep_open = tokio::select! {
                 () = context.shutdown.cancelled() => false,
                 () = writer.closed.cancelled() => false,
@@ -95,8 +119,20 @@ pub(crate) async fn serve(
             if !keep_open {
                 break;
             }
+        } else {
+            let queued = tokio::select! {
+                () = context.shutdown.cancelled() => false,
+                () = writer.closed.cancelled() => false,
+                result = commands.send(DispatchMessage::Execute(value)) => result.is_ok(),
+            };
+            if !queued {
+                break;
+            }
         }
     }
+    drop(commands);
+    worker.abort();
+    let _ = worker.await;
     cleanup_connection(active, &context, writer, connection_guard).await;
 }
 

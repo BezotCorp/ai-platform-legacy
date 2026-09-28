@@ -14,15 +14,17 @@ mod worker_report;
 
 pub(crate) use agent_layer::AgentLayer;
 pub(crate) use aggregation::Aggregation;
-pub(crate) use execution_mode::ExecutionMode;
+pub(crate) use execution_mode::{ExecutionMode, ExecutionModeSummary};
 pub(crate) use layered_moa::LayeredMoa;
 pub(crate) use multi_agent::MultiAgent;
 pub(crate) use multi_agent_strategy::MultiAgentStrategy;
 pub(crate) use population::{
-    ParticipationPolicy, Population, PopulationExecution, PopulationSelection,
+    ParticipationPolicy, PopulationDefinition, PopulationExecution, PopulationSelection,
+    PopulationSelector,
 };
 pub(crate) use scheduler::Scheduler;
 pub(crate) use supervised::Supervised;
 pub(crate) use supervised_execution::SupervisedExecution;
 pub(crate) use supervisor_decision::SupervisorDecision;
+pub(crate) use supervisor_turn::SupervisorTurn;
 pub(crate) use worker_report::WorkerReport;

@@ -23,7 +23,8 @@ impl History {
             if !matches!(message.role.as_str(), "user" | "assistant") {
                 bail!("Rôle de message non autorisé");
             }
-            if message.content.trim().is_empty() || message.content.len() > Self::MAX_MESSAGE_BYTES {
+            if message.content.trim().is_empty() || message.content.len() > Self::MAX_MESSAGE_BYTES
+            {
                 bail!("Contenu de message invalide");
             }
             bytes = bytes
@@ -33,7 +34,6 @@ impl History {
         if bytes > Self::MAX_HISTORY_BYTES {
             bail!("Conversation trop volumineuse");
         }
-
         Ok(())
     }
 }

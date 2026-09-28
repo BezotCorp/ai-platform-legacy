@@ -1,6 +1,6 @@
 use std::sync::{Arc, atomic::AtomicBool};
 
-use crate::sqlite::{readers::Readers, writer::Writer};
+use crate::sqlite::{Readers, Writer};
 
 pub(crate) struct DatabaseInner {
     pub(crate) writer: Writer,

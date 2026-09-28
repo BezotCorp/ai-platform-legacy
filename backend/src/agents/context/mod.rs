@@ -8,9 +8,9 @@ mod retrieval;
 mod tool_context;
 mod tool_exchange;
 
-pub(crate) use assembled_context::{AssembledContext, assemble};
+pub(crate) use assembled_context::assemble;
 pub(crate) use context_budget::ContextBudget;
-pub(crate) use engine::limits;
+pub(crate) use engine::validate_context_limits;
 pub(crate) use prepared_tool_context::PreparedToolContext;
 pub(crate) use provenance::Provenance;
 pub(crate) use ranking::relevance;
