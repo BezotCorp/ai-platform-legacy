@@ -26,7 +26,7 @@ use crate::{
     configurations::ConfigurationStore,
     providers::Client,
     sessions::SessionStore,
-    websocket::{ServerState, socket},
+    io::{ServerState, serve},
 };
 
 const DEFAULT_OLLAMA_HOST: &str = "http://127.0.0.1:11434";
@@ -52,7 +52,7 @@ async fn upgrade(
         return (StatusCode::SERVICE_UNAVAILABLE, "Backend en cours d'arrêt").into_response();
     }
     ws.max_message_size(256 * 1024)
-        .on_upgrade(move |socket| socket::serve(socket, state, connection))
+        .on_upgrade(move |socket| serve(socket, state, connection))
 }
 
 pub(crate) async fn run() -> Result<()> {

@@ -14,11 +14,10 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     agents::{AgentExecution, AgentServices, MemoryStore},
     configurations::ConfigurationStore,
-    event::Event,
+    io::{Event, RunRequest},
     providers::Client,
     sessions::SessionStore,
     tools::ToolApprovalGate,
-    websocket::RunRequest,
 };
 
 pub(crate) const STOP_USER: u8 = 1;

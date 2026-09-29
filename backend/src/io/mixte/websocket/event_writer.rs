@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::{sync::mpsc, task::JoinHandle, time};
 use tokio_util::sync::CancellationToken;
 
-use crate::event::Event;
+use crate::io::Event;
 
 pub(crate) struct EventWriter {
     pub(crate) outbound: mpsc::Sender<Event>,

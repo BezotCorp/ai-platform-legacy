@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc};
 use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use crate::{event::Event, tools::ToolApprovalGate};
+use crate::{io::Event, tools::ToolApprovalGate};
 
 pub(crate) struct ToolCallContext<'a> {
     pub project_root: &'a Path,

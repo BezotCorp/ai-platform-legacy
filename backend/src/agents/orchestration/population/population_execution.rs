@@ -8,7 +8,7 @@ use crate::{
         AgentResources, AgentServices, AgentTurn, ParticipationPolicy, PopulationDefinition,
         PopulationSelector, WorkerReport,
     },
-    event::Event,
+    io::Event,
     sessions::Message,
 };
 

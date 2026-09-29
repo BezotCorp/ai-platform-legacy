@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::{
     agents::tool_call_context::ToolCallContext,
-    event::Event,
+    io::Event,
     tools::{self, ApprovalRequest, ToolApprovalGate, WriteProposal},
 };
 

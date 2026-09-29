@@ -5,11 +5,11 @@ use std::sync::{Arc, atomic::AtomicU8};
 use tokio::sync::{OwnedRwLockReadGuard, mpsc, oneshot};
 
 use crate::{
-    event::Event,
+    io::Event,
     tools::ToolApprovalGate,
-    websocket::{
+    io::{
         ActiveRun, ConnectionContext, DispatchMessage, EventWriter, RunRequest, ServerState,
-        authentication::authenticate, command_dispatch::dispatch,
+        authenticate, dispatch,
     },
 };
 pub(crate) async fn serve(

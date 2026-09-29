@@ -2,7 +2,7 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::event::Event;
+use crate::io::Event;
 
 pub(crate) struct ApprovalRequest<'a> {
     pub request_id: &'a str,

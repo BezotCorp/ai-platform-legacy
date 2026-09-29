@@ -10,7 +10,7 @@ use tokio::{
 };
 
 use crate::{
-    event::Event,
+    io::Event,
     tools::{ApprovalRequest, PendingApproval},
 };
 

@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 
-use crate::websocket::Command;
+use crate::io::Command;
 
 fn match_token(provided: &str, expected: &str) -> bool {
     let left = provided.as_bytes();

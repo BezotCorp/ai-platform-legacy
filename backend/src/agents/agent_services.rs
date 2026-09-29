@@ -3,7 +3,7 @@ use std::{path::Path, sync::Arc};
 use tokio::sync::{Mutex, mpsc};
 use tokio_util::sync::CancellationToken;
 
-use crate::{agents::MemoryStore, event::Event, providers::Client, tools::ToolApprovalGate};
+use crate::{agents::MemoryStore, io::Event, providers::Client, tools::ToolApprovalGate};
 
 pub(crate) struct AgentServices<'a> {
     pub client: &'a Client,

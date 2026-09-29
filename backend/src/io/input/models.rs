@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde_json::json;
 
 use crate::{
-    event::Event,
+    io::Event,
     providers::{AvailableModel, Client},
 };
 

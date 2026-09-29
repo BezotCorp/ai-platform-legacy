@@ -6,9 +6,9 @@ use tokio::{sync::mpsc, task::JoinHandle, time};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    event::Event,
+    io::Event,
     sessions::SessionStore,
-    websocket::{ConnectionContext, RunExecution, RunRequest, STOP_DISCONNECTED, STOP_USER},
+    io::{ConnectionContext, RunExecution, RunRequest, STOP_DISCONNECTED, STOP_USER},
 };
 
 pub(crate) struct ActiveRun {

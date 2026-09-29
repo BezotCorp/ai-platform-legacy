@@ -3,8 +3,8 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::{
-    event::Event,
-    websocket::{ActiveRun, Command, ConnectionContext, models::list},
+    io::Event,
+    io::{ActiveRun, Command, ConnectionContext, list},
 };
 
 pub(crate) async fn dispatch(

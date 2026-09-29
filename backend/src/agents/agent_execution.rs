@@ -6,7 +6,7 @@ use crate::{
         AgentResources, AgentServices, AgentTurn, ExecutionMode, MultiAgentStrategy,
         PopulationExecution, Scheduler, SupervisedExecution,
     },
-    event::Event,
+    io::Event,
     sessions::Message,
 };
 

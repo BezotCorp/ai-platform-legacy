@@ -6,7 +6,7 @@ use crate::{
         AgentConfig, AgentResources, AgentServices, ToolCallContext, ToolContext, ToolInvocation,
         context::assemble,
     },
-    event::Event,
+    io::Event,
     providers::Chat,
     sessions::Message,
 };

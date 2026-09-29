@@ -8,7 +8,7 @@ use crate::{
         AgentResources, AgentServices, AgentTurn, Supervised, SupervisorDecision, SupervisorTurn,
         WorkerReport,
     },
-    event::Event,
+    io::Event,
     sessions::Message,
 };
 
