@@ -3,7 +3,8 @@ use serde::Deserialize;
 
 use crate::{
     agents::ExecutionMode,
-    sessions::{History, Message},
+    conversation::{ConversationAuthor, ConversationEntry, MAX_ENTRIES, validate},
+    io::UserInput,
 };
 
 #[derive(Debug, Deserialize)]
@@ -13,7 +14,8 @@ pub(crate) struct RunRequest {
     pub(crate) command: String,
     pub(crate) request_id: String,
     #[serde(default)]
-    pub(crate) messages: Vec<Message>,
+    pub(crate) history: Vec<ConversationEntry>,
+    pub(crate) input: UserInput,
     pub(crate) mode: Option<ExecutionMode>,
     pub(crate) configuration_id: Option<String>,
     pub(crate) configuration_revision: Option<i64>,
@@ -23,29 +25,41 @@ pub(crate) struct RunRequest {
 
 impl RunRequest {
     pub(crate) fn validate(&self) -> Result<()> {
-        if self.command != "run.start" || self.request_id.is_empty() || self.request_id.len() > 128
-        {
+        if self.command != "run.start" || self.request_id.is_empty() || self.request_id.len() > 128 {
             bail!("Demande d'exécution invalide");
         }
+
         let sources = usize::from(self.mode.is_some())
             + usize::from(self.configuration_id.is_some())
             + usize::from(self.session_id.is_some());
+
         if sources != 1 {
             bail!("Choisir exactement une source de configuration");
         }
-        if self.messages.is_empty() || self.messages.len() > 32 {
-            bail!("Nombre de messages invalide");
+
+        validate(&self.history)?;
+
+        if self.history.len() >= MAX_ENTRIES {
+            bail!("Historique trop long pour accueillir une nouvelle entrée");
         }
-        History::validate(&self.messages)?;
+
+        if self.input.text.trim().is_empty() {
+            bail!("Entrée utilisateur vide");
+        }
+
+        let current = ConversationEntry::human(self.input.text.clone());
+        validate(std::slice::from_ref(&current))?;
+
         if self
-            .messages
+            .history
             .last()
-            .is_none_or(|message| message.role != "user")
+            .is_some_and(|entry| entry.author == ConversationAuthor::Human)
         {
-            bail!("Le dernier message doit venir de l'utilisateur");
+            bail!("L'historique précédent ne peut pas se terminer par une entrée humaine");
         }
+
         if self.session_id.is_some() {
-            if self.messages.len() != 1
+            if !self.history.is_empty()
                 || self.expected_revision.is_none()
                 || self.configuration_revision.is_some()
             {
@@ -54,9 +68,15 @@ impl RunRequest {
         } else if self.expected_revision.is_some() {
             bail!("Révision de session sans identifiant");
         }
+
         if self.configuration_id.is_none() && self.configuration_revision.is_some() {
             bail!("Révision sans configuration");
         }
+
         Ok(())
+    }
+
+    pub(crate) fn current_entry(&self) -> ConversationEntry {
+        ConversationEntry::human(self.input.text.clone())
     }
 }

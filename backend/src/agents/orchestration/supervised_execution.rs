@@ -9,7 +9,7 @@ use crate::{
         WorkerReport,
     },
     io::Event,
-    sessions::Message,
+    conversation::{ConversationAuthor, ConversationEntry},
 };
 
 pub(crate) struct SupervisedExecution;
@@ -17,7 +17,7 @@ pub(crate) struct SupervisedExecution;
 impl SupervisedExecution {
     pub(crate) async fn run(
         config: &Supervised,
-        history: &[Message],
+        history: &[ConversationEntry],
         services: &AgentServices<'_>,
     ) -> Result<()> {
         let client = services.client;
@@ -28,7 +28,7 @@ impl SupervisedExecution {
         let resources = AgentResources::new()?;
         let context_tokens = resources.context_tokens;
         let output_tokens = resources.output_tokens;
-        let mut worker_histories: HashMap<String, Vec<Message>> = HashMap::new();
+        let mut worker_histories: HashMap<String, Vec<ConversationEntry>> = HashMap::new();
         let mut reports = Vec::<WorkerReport>::new();
 
         for step in 0..=config.max_delegations {
@@ -101,8 +101,8 @@ impl SupervisedExecution {
                     let agent_history = worker_histories
                         .entry(agent_id.clone())
                         .or_insert_with(|| history[..history.len() - 1].to_vec());
-                    agent_history.push(Message {
-                        role: "user".to_owned(),
+                    agent_history.push(ConversationEntry {
+                        author: ConversationAuthor::Human,
                         content: format!(
                             "Demande originale : {}\n\nTa tâche actuelle : {}",
                             history.last().context("Conversation vide")?.content,
@@ -112,8 +112,8 @@ impl SupervisedExecution {
                     let answer =
                         AgentTurn::run(worker, step, agent_history, &[], services, &resources)
                             .await?;
-                    agent_history.push(Message {
-                        role: "assistant".to_owned(),
+                    agent_history.push(ConversationEntry {
+                        author: ConversationAuthor::Ai,
                         content: answer.clone(),
                     });
                     reports.push(WorkerReport {

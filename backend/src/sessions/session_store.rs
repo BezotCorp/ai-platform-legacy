@@ -2,7 +2,8 @@ use anyhow::{Result, bail};
 use rusqlite::{OptionalExtension, params};
 
 use crate::{
-    sessions::{History, Message, Session},
+    conversation::{ConversationEntry, validate},
+    sessions::{History, Session},
     sqlite::Database,
 };
 
@@ -54,15 +55,15 @@ impl SessionStore {
         &self,
         id: String,
         expected_revision: i64,
-        messages: Vec<Message>,
+        entries: Vec<ConversationEntry>,
     ) -> Result<Session> {
         Self::validate_id(&id)?;
-        History::validate(&messages)?;
+        validate(&entries)?;
         if expected_revision < 0 {
             bail!("Révision de session invalide");
         }
         let project = self.project.clone();
-        let encoded = serde_json::to_string(&messages)?;
+        let encoded = serde_json::to_string(&entries)?;
         self.database
             .write(move |connection| {
                 let changed = if expected_revision == 0 {
@@ -155,9 +156,9 @@ impl SessionStore {
                     .optional()?;
                 stored
                     .map(|(session, encoded)| {
-                        let messages: Vec<Message> = serde_json::from_str(&encoded)?;
-                        History::validate(&messages)?;
-                        Ok(History { session, messages })
+                        let entries: Vec<ConversationEntry> = serde_json::from_str(&encoded)?;
+                        validate(&entries)?;
+                        Ok(History { session, entries })
                     })
                     .transpose()
             })

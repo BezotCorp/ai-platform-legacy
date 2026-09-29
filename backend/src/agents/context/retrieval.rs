@@ -1,4 +1,7 @@
-use crate::{agents::relevance, sessions::Message};
+use crate::{
+    agents::relevance,
+    conversation::{ConversationAuthor, ConversationEntry},
+};
 
 use anyhow::{Result, anyhow};
 
@@ -11,7 +14,7 @@ struct Exchange {
     relevance: usize,
 }
 
-fn exchange_cost(messages: &[Message]) -> Result<usize> {
+fn exchange_cost(messages: &[ConversationEntry]) -> Result<usize> {
     messages.iter().try_fold(0usize, |total, message| {
         total
             .checked_add(message.content.len())
@@ -23,7 +26,7 @@ fn exchange_cost(messages: &[Message]) -> Result<usize> {
 /// Sélectionne des échanges complets, dans leur ordre d'origine.
 /// Les indices sont relatifs à l'historique complet, dernier message exclu.
 pub(crate) fn select_history(
-    history: &[Message],
+    history: &[ConversationEntry],
     query: &str,
     role_instructions: &str,
     capacity: usize,
@@ -31,7 +34,7 @@ pub(crate) fn select_history(
     let mut exchanges = Vec::new();
     let mut start = None;
     for (index, message) in history.iter().enumerate() {
-        if message.role == "user" {
+        if message.author == ConversationAuthor::Human {
             if let Some(previous) = start {
                 let group = &history[previous..index];
                 exchanges.push(Exchange {

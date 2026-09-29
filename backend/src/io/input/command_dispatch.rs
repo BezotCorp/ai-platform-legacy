@@ -309,10 +309,10 @@ pub(crate) async fn dispatch(
             request_id,
             session_id,
             expected_revision,
-            messages,
+            entries,
         }) => {
             let result = match context.sessions.as_ref() {
-                Some(store) => store.save(session_id, expected_revision, messages).await,
+                Some(store) => store.save(session_id, expected_revision, entries).await,
                 None => Err(anyhow!("Persistance des sessions désactivée")),
             };
             send(

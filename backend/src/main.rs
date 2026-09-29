@@ -1,5 +1,6 @@
 mod agents;
 mod configurations;
+mod conversation;
 mod file_manager;
 mod io;
 mod providers;

@@ -1,5 +1,7 @@
 mod assembled_context;
 mod context_budget;
+mod context_message;
+mod context_role;
 mod engine;
 mod prepared_tool_context;
 mod provenance;
@@ -10,6 +12,8 @@ mod tool_exchange;
 
 pub(crate) use assembled_context::assemble;
 pub(crate) use context_budget::ContextBudget;
+pub(crate) use context_message::ContextMessage;
+pub(crate) use context_role::ContextRole;
 pub(crate) use engine::validate_context_limits;
 pub(crate) use prepared_tool_context::PreparedToolContext;
 pub(crate) use provenance::Provenance;

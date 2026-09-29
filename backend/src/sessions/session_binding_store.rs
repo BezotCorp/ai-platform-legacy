@@ -4,7 +4,8 @@ use rusqlite::{OptionalExtension, params};
 use crate::{
     agents::ExecutionMode,
     configurations::SavedConfiguration,
-    sessions::{BoundSession, History, Message, Session, SessionStore},
+    conversation::{ConversationEntry, validate},
+    sessions::{BoundSession, History, Session, SessionStore},
 };
 
 impl SessionStore {
@@ -146,11 +147,11 @@ impl SessionStore {
                                 .context("Révision de configuration absente")?;
                             let encoded_mode =
                                 encoded_mode.context("Configuration de session absente")?;
-                            let messages: Vec<Message> = serde_json::from_str(&encoded_messages)?;
-                            History::validate(&messages)?;
+                            let entries: Vec<ConversationEntry> = serde_json::from_str(&encoded_messages)?;
+                            validate(&entries)?;
                             let mode: ExecutionMode = serde_json::from_str(&encoded_mode)?;
                             Ok(BoundSession {
-                                history: History { session, messages },
+                                history: History { session, entries },
                                 configuration_id,
                                 configuration_revision,
                                 mode: mode.validate()?,

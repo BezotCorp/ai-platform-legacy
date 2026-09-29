@@ -5,7 +5,11 @@ use rusqlite::{OptionalExtension, params};
 
 use crate::{
     agents::ExecutionMode,
-    sessions::{History, Message, SessionRun, SessionStore},
+    conversation::{
+        ConversationAuthor, ConversationEntry, MAX_ENTRIES, MAX_ENTRY_BYTES,
+        MAX_HISTORY_BYTES, validate,
+    },
+    sessions::{SessionRun, SessionStore},
 };
 
 impl SessionStore {
@@ -14,8 +18,8 @@ impl SessionStore {
         session_id: String,
         expected_revision: i64,
         request_id: String,
-        prompt: Message,
-    ) -> Result<(Vec<Message>, ExecutionMode, i64)> {
+        prompt: ConversationEntry,
+    ) -> Result<(Vec<ConversationEntry>, ExecutionMode, i64)> {
         Self::validate_id(&session_id)?;
         if expected_revision < 1 {
             bail!("Révision de session invalide");
@@ -23,8 +27,8 @@ impl SessionStore {
         if request_id.is_empty() || request_id.len() > 128 {
             bail!("Identifiant d'exécution invalide");
         }
-        History::validate(std::slice::from_ref(&prompt))?;
-        if prompt.role != "user" {
+        validate(std::slice::from_ref(&prompt))?;
+        if prompt.author != ConversationAuthor::Human {
             bail!("Une exécution exige un message utilisateur");
         }
         let project = self.project.clone();
@@ -55,8 +59,8 @@ impl SessionStore {
                 let encoded_mode = stored.2.context("Session sans configuration liée")?;
                 let mode: ExecutionMode = serde_json::from_str(&encoded_mode)?;
                 let mode = mode.validate()?;
-                let mut messages: Vec<Message> = serde_json::from_str(&stored.1)?;
-                History::validate(&messages)?;
+                let mut messages: Vec<ConversationEntry> = serde_json::from_str(&stored.1)?;
+                validate(&messages)?;
                 let running: i64 = connection.query_row(
                     "SELECT COUNT(*)
                      FROM session_runs
@@ -79,14 +83,14 @@ impl SessionStore {
                 let reserved_bytes = prompt
                     .content
                     .len()
-                    .checked_add(History::MAX_MESSAGE_BYTES)
+                    .checked_add(MAX_ENTRY_BYTES)
                     .context("Conversation trop volumineuse")?;
-                let max_previous_messages = History::MAX_MESSAGES - 2;
+                let max_previous_messages = MAX_ENTRIES - 2;
                 let mut archived = Vec::new();
                 while messages.len() > max_previous_messages
                     || active_bytes
                         .checked_add(reserved_bytes)
-                        .is_none_or(|total| total > History::MAX_HISTORY_BYTES)
+                        .is_none_or(|total| total > MAX_HISTORY_BYTES)
                 {
                     let oldest = messages.remove(0);
                     active_bytes -= oldest.content.len();
@@ -108,12 +112,18 @@ impl SessionStore {
                             "INSERT INTO session_message_archive
                                 (project, session_id, sequence, role, content)
                              VALUES (?1, ?2, ?3, ?4, ?5)",
-                            params![project, session_id, next_sequence, old.role, old.content],
+                            params![
+                                project,
+                                session_id,
+                                next_sequence,
+                                old.author.storage_name(),
+                                old.content
+                            ],
                         )?;
                     }
                 }
                 messages.push(prompt.clone());
-                History::validate(&messages)?;
+                validate(&messages)?;
                 let encoded = serde_json::to_string(&messages)?;
                 let changed = connection.execute(
                     "UPDATE sessions
@@ -176,11 +186,8 @@ impl SessionStore {
         answer: String,
     ) -> Result<i64> {
         Self::validate_id(&session_id)?;
-        let response = Message {
-            role: "assistant".to_owned(),
-            content: answer,
-        };
-        History::validate(slice::from_ref(&response))?;
+        let response = ConversationEntry::ai(answer);
+        validate(slice::from_ref(&response))?;
         let response_content = response.content.clone();
         let project = self.project.clone();
         self.database
@@ -206,9 +213,9 @@ impl SessionStore {
                     params![project, session_id],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )?;
-                let mut messages: Vec<Message> = serde_json::from_str(&encoded)?;
+                let mut messages: Vec<ConversationEntry> = serde_json::from_str(&encoded)?;
                 messages.push(response);
-                History::validate(&messages)?;
+                validate(&messages)?;
                 let encoded = serde_json::to_string(&messages)?;
                 connection.execute(
                     "UPDATE sessions

@@ -7,7 +7,7 @@ use crate::{
         PopulationExecution, Scheduler, SupervisedExecution,
     },
     io::Event,
-    sessions::Message,
+    conversation::ConversationEntry,
 };
 
 pub(crate) struct AgentExecution;
@@ -15,7 +15,7 @@ pub(crate) struct AgentExecution;
 impl AgentExecution {
     pub(crate) async fn run(
         mode: &ExecutionMode,
-        history: &[Message],
+        history: &[ConversationEntry],
         services: &AgentServices<'_>,
     ) -> Result<()> {
         let request_id = services.request_id;

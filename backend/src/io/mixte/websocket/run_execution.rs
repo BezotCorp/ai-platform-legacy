@@ -14,6 +14,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     agents::{AgentExecution, AgentServices, MemoryStore},
     configurations::ConfigurationStore,
+    conversation::validate,
     io::{Event, RunRequest},
     providers::Client,
     sessions::SessionStore,
@@ -102,6 +103,8 @@ impl RunExecution {
         let session_id = request.session_id.clone();
         // La réservation SQLite précède l'attente du GPU et l'annonce run.queued.
         // Une demande liée conserve son prompt même si le client se déconnecte.
+        let current_entry = request.current_entry();
+
         let resolved: Result<_> = if let Some(session_id) = &session_id {
             match self.sessions.as_ref() {
                 Some(store) => {
@@ -110,14 +113,16 @@ impl RunExecution {
                             session_id.clone(),
                             request.expected_revision.unwrap_or_default(),
                             request_id.clone(),
-                            request.messages[0].clone(),
+                            current_entry,
                         )
                         .await
                 }
                 None => Err(anyhow!("Persistance des sessions désactivée")),
             }
         } else if let Some(mode) = request.mode {
-            mode.validate().map(|mode| (request.messages, mode, 0))
+            let mut history = request.history;
+            history.push(current_entry);
+            validate(&history).and_then(|()| mode.validate().map(|mode| (history, mode, 0)))
         } else {
             match self.configurations.as_ref() {
                 Some(store) => {
@@ -130,7 +135,11 @@ impl RunExecution {
                             {
                                 Err(anyhow!("Révision de configuration obsolète"))
                             } else {
-                                Ok((request.messages, configuration.mode, 0))
+                                {
+                                    let mut history = request.history;
+                                    history.push(current_entry);
+                                    validate(&history).map(|()| (history, configuration.mode, 0))
+                                }
                             }
                         }
                         Ok(None) => Err(anyhow!("Configuration introuvable")),

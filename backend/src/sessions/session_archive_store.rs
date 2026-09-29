@@ -1,7 +1,10 @@
 use anyhow::{Result, bail};
 use rusqlite::params;
 
-use crate::sessions::{ArchivedMessage, Message, SessionStore};
+use crate::{
+    conversation::{ConversationAuthor, ConversationEntry},
+    sessions::{ArchivedMessage, SessionStore},
+};
 
 impl SessionStore {
     /// Pages d'archives ordonnées de la plus récente à la plus ancienne.
@@ -11,10 +14,13 @@ impl SessionStore {
         before_sequence: Option<i64>,
     ) -> Result<Vec<ArchivedMessage>> {
         Self::validate_id(&session_id)?;
+
         if before_sequence.is_some_and(|sequence| sequence < 1) {
             bail!("Curseur d'archive invalide");
         }
+
         let project = self.project.clone();
+
         self.database
             .read(move |connection| {
                 let mut statement = connection.prepare(
@@ -24,18 +30,24 @@ impl SessionStore {
                        AND (?3 IS NULL OR sequence < ?3)
                      ORDER BY sequence DESC LIMIT 50",
                 )?;
-                let messages =
+
+                let entries =
                     statement.query_map(params![project, session_id, before_sequence], |row| {
+                        let stored_author: String = row.get(1)?;
+                        let author = ConversationAuthor::from_storage(&stored_author)
+                            .ok_or(rusqlite::Error::InvalidQuery)?;
+
                         Ok(ArchivedMessage {
                             sequence: row.get(0)?,
-                            message: Message {
-                                role: row.get(1)?,
+                            entry: ConversationEntry {
+                                author,
                                 content: row.get(2)?,
                             },
                             archived_at: row.get(3)?,
                         })
                     })?;
-                Ok(messages.collect::<rusqlite::Result<Vec<_>>>()?)
+
+                Ok(entries.collect::<rusqlite::Result<Vec<_>>>()?)
             })
             .await
     }

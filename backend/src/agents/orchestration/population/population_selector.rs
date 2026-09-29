@@ -7,7 +7,7 @@ use crate::{
         context::assemble,
     },
     providers::Chat,
-    sessions::Message,
+    conversation::ConversationEntry,
 };
 
 pub(crate) struct PopulationSelector;
@@ -15,7 +15,7 @@ pub(crate) struct PopulationSelector;
 impl PopulationSelector {
     pub(crate) async fn select(
         config: &PopulationDefinition,
-        history: &[Message],
+        history: &[ConversationEntry],
         reports: &[WorkerReport],
         bounds: std::ops::RangeInclusive<usize>,
         services: &AgentServices<'_>,

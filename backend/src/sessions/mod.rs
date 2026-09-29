@@ -1,7 +1,6 @@
 mod archived_message;
 mod bound_session;
 mod history;
-mod message;
 mod session;
 mod session_agent_turn;
 mod session_archive_store;
@@ -16,7 +15,6 @@ mod sqlite;
 pub(crate) use archived_message::ArchivedMessage;
 pub(crate) use bound_session::BoundSession;
 pub(crate) use history::History;
-pub(crate) use message::Message;
 pub(crate) use session::Session;
 pub(crate) use session_agent_turn::SessionAgentTurn;
 pub(crate) use session_run::SessionRun;

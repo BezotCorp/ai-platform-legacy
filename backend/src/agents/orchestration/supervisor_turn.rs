@@ -5,7 +5,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     agents::{Supervised, SupervisorDecision, WorkerReport, context::assemble},
     providers::{Chat, Client},
-    sessions::Message,
+    conversation::ConversationEntry,
 };
 
 pub(crate) struct SupervisorTurn;
@@ -15,7 +15,7 @@ impl SupervisorTurn {
     pub(crate) async fn decide(
         config: &Supervised,
         client: &Client,
-        history: &[Message],
+        history: &[ConversationEntry],
         reports: &[WorkerReport],
         context_tokens: usize,
         output_tokens: usize,

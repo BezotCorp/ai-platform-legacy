@@ -3,7 +3,7 @@ use serde_json::Value;
 
 use crate::{
     agents::{PreparedToolContext, ToolExchange, relevance},
-    sessions::Message,
+    agents::context::{ContextMessage, ContextRole},
 };
 
 pub(crate) struct ToolContext {
@@ -17,7 +17,7 @@ pub(crate) struct ToolContext {
 
 impl ToolContext {
     pub(crate) fn new(
-        messages: Vec<Message>,
+        messages: Vec<ContextMessage>,
         history_indices: Vec<usize>,
         memory_ids: Vec<i64>,
     ) -> Result<Self> {
@@ -26,7 +26,7 @@ impl ToolContext {
             .next()
             .ok_or_else(|| anyhow::anyhow!("Contexte obligatoire absent"))?;
         let mut remaining = Vec::new();
-        let system = if first.role == "system" {
+        let system = if first.role == ContextRole::System {
             Some(serde_json::to_value(first)?)
         } else {
             remaining.push(serde_json::to_value(first)?);

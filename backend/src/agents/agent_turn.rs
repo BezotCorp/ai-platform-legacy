@@ -8,7 +8,7 @@ use crate::{
     },
     io::Event,
     providers::Chat,
-    sessions::Message,
+    conversation::ConversationEntry,
 };
 
 const MAX_ROUNDS: usize = 8;
@@ -20,7 +20,7 @@ impl AgentTurn {
     pub(crate) async fn run(
         agent: &AgentConfig,
         layer_index: usize,
-        history: &[Message],
+        history: &[ConversationEntry],
         previous_layer: &[(String, String)],
         services: &AgentServices<'_>,
         resources: &AgentResources,

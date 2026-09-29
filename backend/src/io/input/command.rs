@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::{agents::ExecutionMode, sessions::Message};
+use crate::{agents::ExecutionMode, conversation::ConversationEntry};
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
@@ -84,7 +84,7 @@ pub(crate) enum Command {
         request_id: String,
         session_id: String,
         expected_revision: i64,
-        messages: Vec<Message>,
+        entries: Vec<ConversationEntry>,
     },
     #[serde(rename = "session.load")]
     SessionLoad {

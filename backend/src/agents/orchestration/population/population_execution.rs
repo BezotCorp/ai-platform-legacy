@@ -9,7 +9,7 @@ use crate::{
         PopulationSelector, WorkerReport,
     },
     io::Event,
-    sessions::Message,
+    conversation::{ConversationAuthor, ConversationEntry},
 };
 
 pub(crate) struct PopulationExecution;
@@ -17,7 +17,7 @@ pub(crate) struct PopulationExecution;
 impl PopulationExecution {
     pub(crate) async fn run(
         config: &PopulationDefinition,
-        history: &[Message],
+        history: &[ConversationEntry],
         services: &AgentServices<'_>,
     ) -> Result<()> {
         let request_id = services.request_id;
@@ -26,7 +26,7 @@ impl PopulationExecution {
         let memory = services.memory;
         let resources = AgentResources::new()?;
         let original_request = &history.last().context("Conversation vide")?.content;
-        let mut individual_histories = HashMap::<String, Vec<Message>>::new();
+        let mut individual_histories = HashMap::<String, Vec<ConversationEntry>>::new();
         let mut reports = Vec::<WorkerReport>::new();
         let mut previous_round = Vec::<(String, String)>::new();
         for round in 0..config.rounds {
@@ -76,8 +76,8 @@ impl PopulationExecution {
                 let agent_history = individual_histories
                     .entry(agent.identity.id.clone())
                     .or_insert_with(|| history[..history.len() - 1].to_vec());
-                agent_history.push(Message {
-                    role: "user".to_owned(),
+                agent_history.push(ConversationEntry {
+                    author: ConversationAuthor::Human,
                     content: format!(
                         "Demande originale : {}\n\n\
                          Tour collaboratif {}. \
@@ -100,8 +100,8 @@ impl PopulationExecution {
                 .await?;
                 // Chaque participant conserve son historique propre.
                 // Les échanges collectifs sont bornés séparément.
-                agent_history.push(Message {
-                    role: "assistant".to_owned(),
+                agent_history.push(ConversationEntry {
+                    author: ConversationAuthor::Ai,
                     content: answer.chars().take(2000).collect(),
                 });
                 let shared = answer.chars().take(240).collect::<String>();
